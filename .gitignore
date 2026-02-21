@@ -1,0 +1,18 @@
+# Compiled binaries
+wiz-tui
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+*.out
+
+# Environment variables (Crucial!)
+.env
+
+# Editor directories
+.idea/
+.vscode/
