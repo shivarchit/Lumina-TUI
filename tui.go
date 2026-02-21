@@ -1,7 +1,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -15,7 +17,8 @@ import (
 type sessionState int
 
 const (
-	menuView sessionState = iota
+	setupView sessionState = iota // Added setup state
+	menuView
 	colorPickerView
 	hexInputView
 	brightnessView
@@ -24,12 +27,10 @@ const (
 
 type timerFinishedMsg struct{}
 
-// Sleek Catppuccin-inspired Palette
 var (
 	mauve   = lipgloss.Color("#CBA6F7")
 	blue    = lipgloss.Color("#89B4FA")
 	green   = lipgloss.Color("#A6E3A1")
-	red     = lipgloss.Color("#F38BA8")
 	textCol = lipgloss.Color("#CDD6F4")
 	subtext = lipgloss.Color("#6C7086")
 	surface = lipgloss.Color("#313244")
@@ -48,6 +49,7 @@ var colorPalette = []struct{ name, hex string }{
 
 type model struct {
 	state        sessionState
+	setupStep    int // Tracks IP vs Port
 	choices      []string
 	icons        []string
 	cursor       int
@@ -62,9 +64,9 @@ type model struct {
 	timerActive  bool
 }
 
-func initialModel(ip, port string) model {
+func initialModel(ip, port string, needsSetup bool) model {
 	ti := textinput.New()
-	ti.CharLimit = 10
+	ti.CharLimit = 15
 	ti.Width = 20
 	ti.PromptStyle = lipgloss.NewStyle().Foreground(mauve)
 	ti.TextStyle = lipgloss.NewStyle().Foreground(textCol)
@@ -73,8 +75,16 @@ func initialModel(ip, port string) model {
 	s.Spinner = spinner.Line
 	s.Style = lipgloss.NewStyle().Foreground(blue).Bold(true)
 
+	state := menuView
+	if needsSetup {
+		state = setupView
+		ti.Placeholder = "e.g. 192.168.1.15"
+		ti.Focus()
+	}
+
 	return model{
-		state:        menuView,
+		state:        state,
+		setupStep:    0,
 		choices:      []string{"Toggle Power", "Color Grid", "Hex Color", "Brightness", "Sleep Timer", "Exit"},
 		icons:        []string{"⚡", "🎨", "✍️", "☀️", "⏱️", "🚪"},
 		status:       "Ready.",
@@ -120,6 +130,40 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 
+		// Handle Setup Logic Before Main Menu
+		if m.state == setupView {
+			switch msg.String() {
+			case "enter":
+				if m.setupStep == 0 {
+					m.ip = m.textInput.Value()
+					if m.ip == "" { m.ip = "192.168.1.2" } // Fallback
+					m.setupStep = 1
+					m.textInput.SetValue("")
+					m.textInput.Placeholder = "e.g. 38899"
+				} else {
+					m.port = m.textInput.Value()
+					if m.port == "" { m.port = "38899" } // Fallback
+					
+					// Save Config
+					cfg := Config{IP: m.ip, Port: m.port}
+					data, _ := json.Marshal(cfg)
+					_ = os.WriteFile(getConfigPath(), data, 0644)
+					
+					m.state = menuView
+					m.textInput.Blur()
+					m.textInput.SetValue("")
+					m.status = "Config Saved!"
+				}
+			case "esc":
+				return m, tea.Quit
+			default:
+				m.textInput, cmd = m.textInput.Update(msg)
+				cmds = append(cmds, cmd)
+			}
+			return m, tea.Batch(cmds...)
+		}
+
+		// Original Menu Logic
 		switch m.state {
 		case menuView:
 			switch msg.String() {
@@ -135,37 +179,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.isOn = !m.isOn
 					sendCommand(m.ip, m.port, "setState", map[string]interface{}{"state": m.isOn})
 					if m.isOn { m.status = "Power: ON" } else { m.status = "Power: OFF" }
-				case 1:
-					m.state = colorPickerView
+				case 1: m.state = colorPickerView
 				case 2:
 					m.state = hexInputView
 					m.textInput.Placeholder = "#CBA6F7"
 					m.textInput.SetValue("")
 					m.textInput.Focus()
-				case 3:
-					m.state = brightnessView
+				case 3: m.state = brightnessView
 				case 4:
 					m.state = timerInputView
 					m.textInput.Placeholder = "Mins (e.g. 15)"
 					m.textInput.SetValue("")
 					m.textInput.Focus()
-				case 5:
-					return m, tea.Quit
+				case 5: return m, tea.Quit
 				}
 			}
 
 		case colorPickerView:
 			switch msg.String() {
-			case "esc", "q":
-				m.state = menuView
-			case "up", "k":
-				if m.colorCursor >= 3 { m.colorCursor -= 3 }
-			case "down", "j":
-				if m.colorCursor < len(colorPalette)-3 { m.colorCursor += 3 }
-			case "left", "h":
-				if m.colorCursor > 0 { m.colorCursor-- }
-			case "right", "l":
-				if m.colorCursor < len(colorPalette)-1 { m.colorCursor++ }
+			case "esc", "q": m.state = menuView
+			case "up", "k": if m.colorCursor >= 3 { m.colorCursor -= 3 }
+			case "down", "j": if m.colorCursor < len(colorPalette)-3 { m.colorCursor += 3 }
+			case "left", "h": if m.colorCursor > 0 { m.colorCursor-- }
+			case "right", "l": if m.colorCursor < len(colorPalette)-1 { m.colorCursor++ }
 			case "enter":
 				selectedHex := colorPalette[m.colorCursor].hex
 				r, g, b, _ := hexToRGB(selectedHex)
@@ -178,8 +214,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case hexInputView:
 			switch msg.String() {
-			case "esc":
-				m.state = menuView
+			case "esc": m.state = menuView
 			case "enter":
 				val := m.textInput.Value()
 				r, g, b, err := hexToRGB(val)
@@ -199,8 +234,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case brightnessView:
 			switch msg.String() {
-			case "esc", "q", "enter":
-				m.state = menuView
+			case "esc", "q", "enter": m.state = menuView
 			case "left", "h":
 				if m.brightness > 10 { m.brightness -= 10 }
 				sendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"dimming": m.brightness})
@@ -213,8 +247,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case timerInputView:
 			switch msg.String() {
-			case "esc":
-				m.state = menuView
+			case "esc": m.state = menuView
 			case "enter":
 				val := m.textInput.Value()
 				mins, err := strconv.Atoi(val)
@@ -234,21 +267,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	// Styling based on device state
+	// First-run Setup Screen Rendering
+	if m.state == setupView {
+		prompt := "Enter WiZ Device IP Address:"
+		if m.setupStep == 1 {
+			prompt = "Enter UDP Port (Default 38899):"
+		}
+		
+		box := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(mauve).
+			Padding(2, 4).
+			Width(42).
+			Align(lipgloss.Center)
+
+		content := fmt.Sprintf("%s\n\n%s\n\n%s", 
+			lipgloss.NewStyle().Bold(true).Foreground(mauve).Render("FIRST-TIME SETUP"),
+			prompt,
+			m.textInput.View())
+			
+		return "\n" + box.Render(content) + "\n"
+	}
+
+	// Original pristine UI Rendering
 	borderColor := surface
 	if m.isOn {
 		borderColor = mauve
 	}
 
-	// Increase width slightly and set explicit height to ensure borders close
 	panelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Padding(1, 2).
-		Width(42).  // Increased width to prevent clipping
+		Width(42). 
 		Height(15)
 
-	// List Styles
 	itemStyle := lipgloss.NewStyle().Foreground(subtext).PaddingLeft(1)
 	selectedStyle := lipgloss.NewStyle().Foreground(mauve).Bold(true).PaddingLeft(1)
 
@@ -297,13 +350,11 @@ func (m model) View() string {
 		rightPanel += fmt.Sprintf("\n\n%s %s", m.spinner.View(), lipgloss.NewStyle().Foreground(blue).Render("Timer Active"))
 	}
 
-	// This ensures the content is aligned at the TOP LEFT of the box
 	leftBox := panelStyle.Render(leftPanel)
 	rightBox := panelStyle.Render(rightPanel)
 
 	mainUI := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, rightBox)
 
-	// Bottom Bar
 	modeStr := " NORMAL "
 	modeBg := blue
 	if m.state != menuView {
