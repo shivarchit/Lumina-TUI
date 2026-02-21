@@ -1,5 +1,9 @@
-# Compiled binaries
-wiz-tui
+# Environments and Secrets (Crucial!)
+.env
+
+# Built application binaries
+lumina
+lumina.exe
 *.exe
 *.exe~
 *.dll
@@ -10,9 +14,12 @@ wiz-tui
 *.test
 *.out
 
-# Environment variables (Crucial!)
-.env
+# Go workspace files
+go.work
+go.work.sum
 
-# Editor directories
+# IDE / Editor folders
 .idea/
 .vscode/
+*.swp
+.DS_Store
