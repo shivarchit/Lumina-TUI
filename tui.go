@@ -24,13 +24,13 @@ const (
 
 type timerFinishedMsg struct{}
 
-// Sleek Yazi/Catppuccin Palette
+// Sleek Catppuccin-inspired Palette
 var (
 	mauve   = lipgloss.Color("#CBA6F7")
 	blue    = lipgloss.Color("#89B4FA")
 	green   = lipgloss.Color("#A6E3A1")
 	red     = lipgloss.Color("#F38BA8")
-	text    = lipgloss.Color("#CDD6F4")
+	textCol = lipgloss.Color("#CDD6F4")
 	subtext = lipgloss.Color("#6C7086")
 	surface = lipgloss.Color("#313244")
 	base    = lipgloss.Color("#1E1E2E")
@@ -54,34 +54,34 @@ type model struct {
 	colorCursor  int
 	status       string
 	ip, port     string
-	
 	isOn         bool
 	currentColor string
 	brightness   int
-
-	textInput   textinput.Model
-	spinner     spinner.Model
-	timerActive bool
+	textInput    textinput.Model
+	spinner      spinner.Model
+	timerActive  bool
 }
 
 func initialModel(ip, port string) model {
 	ti := textinput.New()
-	ti.CharLimit = 10; ti.Width = 20
+	ti.CharLimit = 10
+	ti.Width = 20
 	ti.PromptStyle = lipgloss.NewStyle().Foreground(mauve)
-	ti.TextStyle = lipgloss.NewStyle().Foreground(text)
-	
-	// Yazi style line spinner
-	s := spinner.New(); s.Spinner = spinner.Line; s.Style = lipgloss.NewStyle().Foreground(blue).Bold(true)
+	ti.TextStyle = lipgloss.NewStyle().Foreground(textCol)
+
+	s := spinner.New()
+	s.Spinner = spinner.Line
+	s.Style = lipgloss.NewStyle().Foreground(blue).Bold(true)
 
 	return model{
 		state:        menuView,
 		choices:      []string{"Toggle Power", "Color Grid", "Hex Color", "Brightness", "Sleep Timer", "Exit"},
-		icons: []string{"⚡", "🎨", "✍️", "☀️", "⏱️", "🚪"},
+		icons:        []string{"⚡", "🎨", "✍️", "☀️", "⏱️", "🚪"},
 		status:       "Ready.",
 		ip:           ip,
 		port:         port,
-		isOn:         true,        
-		currentColor: "#CBA6F7", 
+		isOn:         true,
+		currentColor: "#CBA6F7",
 		brightness:   100,
 		textInput:    ti,
 		spinner:      s,
@@ -89,7 +89,10 @@ func initialModel(ip, port string) model {
 }
 
 func startTimer(d time.Duration) tea.Cmd {
-	return func() tea.Msg { time.Sleep(d); return timerFinishedMsg{} }
+	return func() tea.Msg {
+		time.Sleep(d)
+		return timerFinishedMsg{}
+	}
 }
 
 func (m model) Init() tea.Cmd {
@@ -113,44 +116,56 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = "Timer finished. Power off."
 		return m, nil
 	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" { return m, tea.Quit }
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
 
 		switch m.state {
-		
 		case menuView:
 			switch msg.String() {
-			case "q": return m, tea.Quit
-			case "up", "k": if m.cursor > 0 { m.cursor-- }
-			case "down", "j": if m.cursor < len(m.choices)-1 { m.cursor++ }
+			case "q":
+				return m, tea.Quit
+			case "up", "k":
+				if m.cursor > 0 { m.cursor-- }
+			case "down", "j":
+				if m.cursor < len(m.choices)-1 { m.cursor++ }
 			case "enter", " ":
 				switch m.cursor {
 				case 0:
 					m.isOn = !m.isOn
 					sendCommand(m.ip, m.port, "setState", map[string]interface{}{"state": m.isOn})
 					if m.isOn { m.status = "Power: ON" } else { m.status = "Power: OFF" }
-				case 1: m.state = colorPickerView
-				case 2: 
+				case 1:
+					m.state = colorPickerView
+				case 2:
 					m.state = hexInputView
 					m.textInput.Placeholder = "#CBA6F7"
 					m.textInput.SetValue("")
 					m.textInput.Focus()
-				case 3: m.state = brightnessView
+				case 3:
+					m.state = brightnessView
 				case 4:
 					m.state = timerInputView
 					m.textInput.Placeholder = "Mins (e.g. 15)"
 					m.textInput.SetValue("")
 					m.textInput.Focus()
-				case 5: return m, tea.Quit
+				case 5:
+					return m, tea.Quit
 				}
 			}
 
 		case colorPickerView:
 			switch msg.String() {
-			case "esc", "q": m.state = menuView
-			case "up", "k": if m.colorCursor >= 3 { m.colorCursor -= 3 }
-			case "down", "j": if m.colorCursor < len(colorPalette)-3 { m.colorCursor += 3 }
-			case "left", "h": if m.colorCursor > 0 { m.colorCursor-- }
-			case "right", "l": if m.colorCursor < len(colorPalette)-1 { m.colorCursor++ }
+			case "esc", "q":
+				m.state = menuView
+			case "up", "k":
+				if m.colorCursor >= 3 { m.colorCursor -= 3 }
+			case "down", "j":
+				if m.colorCursor < len(colorPalette)-3 { m.colorCursor += 3 }
+			case "left", "h":
+				if m.colorCursor > 0 { m.colorCursor-- }
+			case "right", "l":
+				if m.colorCursor < len(colorPalette)-1 { m.colorCursor++ }
 			case "enter":
 				selectedHex := colorPalette[m.colorCursor].hex
 				r, g, b, _ := hexToRGB(selectedHex)
@@ -163,14 +178,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case hexInputView:
 			switch msg.String() {
-			case "esc": m.state = menuView
+			case "esc":
+				m.state = menuView
 			case "enter":
 				val := m.textInput.Value()
 				r, g, b, err := hexToRGB(val)
 				if err != nil {
 					m.status = "Err: Invalid Hex"
 				} else {
-					sendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"r": r, "g": g, "b": b, "dimming": 100})
+					sendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness})
 					m.currentColor = val
 					m.isOn = true
 					m.status = fmt.Sprintf("Color: %s", val)
@@ -183,7 +199,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case brightnessView:
 			switch msg.String() {
-			case "esc", "q", "enter": m.state = menuView
+			case "esc", "q", "enter":
+				m.state = menuView
 			case "left", "h":
 				if m.brightness > 10 { m.brightness -= 10 }
 				sendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"dimming": m.brightness})
@@ -196,7 +213,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case timerInputView:
 			switch msg.String() {
-			case "esc": m.state = menuView
+			case "esc":
+				m.state = menuView
 			case "enter":
 				val := m.textInput.Value()
 				mins, err := strconv.Atoi(val)
@@ -216,17 +234,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	// Yazi Panel Styling
-	panelBorder := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(surface).Padding(1, 2).Width(38).Height(14)
-	activePanelBorder := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(mauve).Padding(1, 2).Width(38).Height(14)
+	// Styling based on device state
+	borderColor := surface
+	if m.isOn {
+		borderColor = mauve
+	}
+
+	// Increase width slightly and set explicit height to ensure borders close
+	panelStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Padding(1, 2).
+		Width(42).  // Increased width to prevent clipping
+		Height(15)
 
 	// List Styles
 	itemStyle := lipgloss.NewStyle().Foreground(subtext).PaddingLeft(1)
 	selectedStyle := lipgloss.NewStyle().Foreground(mauve).Bold(true).PaddingLeft(1)
 
 	var leftPanel string
-
-	if m.state == menuView {
+	switch m.state {
+	case menuView:
 		for i, choice := range m.choices {
 			icon := m.icons[i]
 			if m.cursor == i {
@@ -235,60 +263,47 @@ func (m model) View() string {
 				leftPanel += itemStyle.Render(fmt.Sprintf("  %s  %s", icon, choice)) + "\n"
 			}
 		}
-	} else if m.state == colorPickerView {
-		leftPanel = lipgloss.NewStyle().Foreground(blue).Render("󰏘 Select Color") + "\n\n"
+	case colorPickerView:
+		leftPanel = lipgloss.NewStyle().Foreground(blue).Render("Select Color") + "\n\n"
 		for i, c := range colorPalette {
 			text := c.name
-			
 			bg := lipgloss.Color(c.hex)
 			fg := lipgloss.Color("#11111B")
-			
-			if m.colorCursor == i {
-				text = "▶ " + text 
-			} else {
-				text = "  " + text
-			}
-
-			block := lipgloss.NewStyle().Background(bg).Foreground(fg).Width(10).Render(text)
+			if m.colorCursor == i { text = "▶ " + text } else { text = "  " + text }
+			block := lipgloss.NewStyle().Background(bg).Foreground(fg).Width(11).Align(lipgloss.Center).Render(text)
 			leftPanel += block + " "
 			if (i+1)%3 == 0 { leftPanel += "\n" }
 		}
-	} else if m.state == hexInputView {
-		leftPanel = lipgloss.NewStyle().Foreground(blue).Render("󰸌 Input Hex") + "\n\n" + m.textInput.View() + "\n\n" + lipgloss.NewStyle().Foreground(subtext).Render("esc to cancel")
-	} else if m.state == brightnessView {
+	case hexInputView:
+		leftPanel = lipgloss.NewStyle().Foreground(blue).Render("Input Hex Code") + "\n\n" + m.textInput.View()
+	case brightnessView:
 		bars := m.brightness / 10
-		slider := strings.Repeat("━", bars) + "┫" + strings.Repeat("┈┈", 10-bars)
-		
+		slider := strings.Repeat("━", bars) + "┫" + strings.Repeat("┈", 10-bars)
 		coloredSlider := lipgloss.NewStyle().Foreground(mauve).Render(slider)
-		leftPanel = lipgloss.NewStyle().Foreground(blue).Render("󰃠 Brightness") + fmt.Sprintf("\n\n%s %d%%\n\n", coloredSlider, m.brightness) + lipgloss.NewStyle().Foreground(subtext).Render("h/l to adjust")
-	} else if m.state == timerInputView {
-		leftPanel = lipgloss.NewStyle().Foreground(blue).Render("󰔟 Sleep Timer") + "\n\n" + m.textInput.View() + "\n\n" + lipgloss.NewStyle().Foreground(subtext).Render("esc to cancel")
+		leftPanel = lipgloss.NewStyle().Foreground(blue).Render("Brightness Control") + fmt.Sprintf("\n\n%s %d%%", coloredSlider, m.brightness)
+	case timerInputView:
+		leftPanel = lipgloss.NewStyle().Foreground(blue).Render("Sleep Timer") + "\n\n" + m.textInput.View()
 	}
 
 	powerIcon := "⏺"
 	powerColor := subtext
-	if m.isOn {
-		powerColor = green
-	}
+	if m.isOn { powerColor = green }
 	
-	rightPanel := fmt.Sprintf("%s\n\n󰩟 Target\n%s:%s\n\n󰋽 Action\n%s", 
+	rightPanel := fmt.Sprintf("%s\n\nTarget:\n%s:%s\n\nAction:\n%s", 
 		lipgloss.NewStyle().Foreground(powerColor).Render(powerIcon+" Power"), 
 		m.ip, m.port, m.status)
 
 	if m.timerActive {
-		rightPanel += fmt.Sprintf("\n\n%s 󰔟 %s", m.spinner.View(), lipgloss.NewStyle().Foreground(blue).Render("Running"))
+		rightPanel += fmt.Sprintf("\n\n%s %s", m.spinner.View(), lipgloss.NewStyle().Foreground(blue).Render("Timer Active"))
 	}
 
-	// Determine which panel gets the "Active" highlight border
-	leftBox := panelBorder.Render(leftPanel)
-	rightBox := panelBorder.Render(rightPanel)
-	if m.state != menuView {
-		leftBox = activePanelBorder.Render(leftPanel)
-	}
+	// This ensures the content is aligned at the TOP LEFT of the box
+	leftBox := panelStyle.Render(leftPanel)
+	rightBox := panelStyle.Render(rightPanel)
 
 	mainUI := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, rightBox)
 
-	// Yazi-style Bottom Status Bar
+	// Bottom Bar
 	modeStr := " NORMAL "
 	modeBg := blue
 	if m.state != menuView {
@@ -297,10 +312,10 @@ func (m model) View() string {
 	}
 
 	modeBadge := lipgloss.NewStyle().Background(modeBg).Foreground(base).Bold(true).Render(modeStr)
-	infoBadge := lipgloss.NewStyle().Background(surface).Foreground(text).Padding(0, 1).Render("󰛨 Lumina")
-	helpBadge := lipgloss.NewStyle().Background(base).Foreground(subtext).Padding(0, 1).Render("↑/↓/h/l: nav • enter: sel • q: quit")
-
-	statusBar := lipgloss.JoinHorizontal(lipgloss.Top, modeBadge, infoBadge, helpBadge)
+	infoBadge := lipgloss.NewStyle().Background(surface).Foreground(textCol).Padding(0, 1).Render("Lumina")
+	versionBadge := lipgloss.NewStyle().Background(base).Foreground(subtext).Padding(0, 1).Render(Version)
+	
+	statusBar := lipgloss.JoinHorizontal(lipgloss.Top, modeBadge, infoBadge, versionBadge)
 
 	return "\n" + mainUI + "\n" + statusBar + "\n"
 }

@@ -22,4 +22,6 @@ go.work.sum
 .idea/
 .vscode/
 *.swp
+# Build artifacts
+dist/
 .DS_Store
