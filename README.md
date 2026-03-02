@@ -24,6 +24,15 @@ Built in Go with the phenomenal Bubble Tea framework, Lumina-TUI is designed for
 - **⏱️ Background Sleep Timer**  
   Set a timer and watch the animated status spinner run while the UI remains fully interactive.
 
+- **🔍 Smart Bulb Discovery**  
+  Auto-scans local subnets, de-duplicates bulbs by MAC/IP, and lets you select and persist a target instantly.
+
+- **💾 Saved Device Profiles**  
+  Save discovered bulbs with custom names and quickly re-select them across app restarts.
+
+- **📈 Live Telemetry Panel**  
+  A btop-inspired dashboard shows command health, latency sparklines, brightness trend, and discovery performance.
+
 - **✨ Sleek Aesthetic**  
   Clean multi-pane layout, dynamic border highlights, and a Vim-style bottom status bar (Normal/Insert modes).
 
@@ -70,7 +79,7 @@ go mod tidy
 ### 4️⃣ Run the App
 
 ```bash
-go run .
+go run ./internal
 ```
 
 ---
@@ -80,7 +89,7 @@ go run .
 To use Lumina-TUI without `go run`, compile it into a single executable:
 
 ```bash
-go build -o lumina
+go build -o lumina ./internal
 ```
 
 Move the `lumina` binary to `/usr/local/bin` to access it globally:
@@ -104,6 +113,9 @@ The interface is fully keyboard-driven:
 - `↑` / `↓` or `k` / `j` — Navigate the menu and color grid  
 - `←` / `→` or `h` / `l` — Adjust brightness or move horizontally  
 - `Enter` — Select / Confirm  
+- `r` — Refresh device discovery scan  
+- `s` — Save selected discovered device with a custom name  
+- `d` — Delete selected saved device  
 - `Esc` — Cancel input mode  
 - `q` or `Ctrl + C` — Quit application  
 
@@ -113,9 +125,13 @@ The interface is fully keyboard-driven:
 
 Lumina-TUI follows a modular architecture:
 
-- `main.go` — Entry point and environment loading  
-- `tui.go` — Bubble Tea model, update, and view logic  
-- `wiz.go` — UDP networking and JSON payload handling  
+- `internal/main.go` — CLI entry point  
+- `internal/app/run.go` — startup flow and CLI mode handling  
+- `internal/config/config.go` — config validation and persistence  
+- `internal/ui/` — Bubble Tea model, update loop, and rendering  
+- `internal/wiz/client.go` — UDP networking and discovery logic  
+- `internal/version/version.go` — application version constant  
+- `build/release.sh` — cross-platform release build script  
 
 ---
 

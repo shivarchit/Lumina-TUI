@@ -94,7 +94,7 @@ func initialModel(ip, port string, needsSetup bool) model {
 	return model{
 		state:             state,
 		setupStep:         0,
-		choices:           []string{"Toggle Power", "Color Grid", "Hex Colors", "Brightness", "Sleep Timer", "Discover Devices", "Help", "Exit"},
+		choices:           []string{"Toggle Power", "Color Grid", "Hex Colors", "Brightness. ", "Sleep Timer", "Discover Devices", "Help", "Exit"},
 		icons:             []string{"⚡", "🎨", "✍️", "☀️", "⏱️", "🔍", "❓", "🚪"},
 		status:            "Ready.",
 		ip:                ip,
