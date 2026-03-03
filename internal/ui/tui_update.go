@@ -6,16 +6,21 @@ import (
 	"strings"
 	"time"
 
+	"wiz-tui/internal/config"
+	"wiz-tui/internal/wiz"
+
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"wiz-tui/internal/config"
-	"wiz-tui/internal/wiz"
 )
 
 // Init configures startup commands for text input and spinner.
 func (m model) Init() tea.Cmd {
-	return tea.Batch(textinput.Blink, m.spinner.Tick)
+	cmds := []tea.Cmd{textinput.Blink, m.spinner.Tick}
+	if m.state != setupView && m.ip != "" && m.port != "" {
+		cmds = append(cmds, syncDeviceStateCmd(m.ip, m.port))
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update handles all messages and user interactions for the TUI model.
@@ -25,7 +30,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case spinner.TickMsg:
-		if m.timerActive || m.discovering {
+		if m.timerActive || m.discovering || m.syncingState {
 			m.spinner, cmd = m.spinner.Update(msg)
 			cmds = append(cmds, cmd)
 		}
@@ -66,6 +71,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.status = fmt.Sprintf("Discovery complete: %d bulb(s)", len(m.discoveredDevices))
 		}
+	case stateSyncResultMsg:
+		m.syncingState = false
+		m.commandLatencyMs = appendBounded(m.commandLatencyMs, int(msg.elapsed.Milliseconds()), 30)
+		if msg.err != nil {
+			m.status = fmt.Sprintf("State sync failed: %v", msg.err)
+			return m, nil
+		}
+		m.isOn = msg.state.Power
+		if msg.state.Brightness > 0 {
+			m.brightness = msg.state.Brightness
+			m.brightnessHistory = appendBounded(m.brightnessHistory, m.brightness, 30)
+		}
+		if strings.TrimSpace(msg.state.ColorHex) != "" {
+			m.currentColor = msg.state.ColorHex
+		}
+		m.status = "State synced"
+		return m, nil
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
@@ -306,6 +328,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.persistConfig()
 					m.status = fmt.Sprintf("Selected: %s (%s)", selectedDevice.Name, selectedDevice.IP)
 					m.state = menuView
+					m.syncingState = true
+					cmds = append(cmds, syncDeviceStateCmd(m.ip, m.port), m.spinner.Tick)
 				}
 			case "s":
 				if len(m.discoveredDevices) > 0 {
@@ -332,6 +356,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				if len(m.savedDevices) > 0 {
 					selected := m.savedDevices[m.savedDeviceCursor]
+					if strings.TrimSpace(selected.Mac) != "" {
+						resolvedIP := ""
+						discovered, err := wiz.DiscoverDevices()
+						if err == nil {
+							selectedMAC := strings.ToLower(strings.TrimSpace(selected.Mac))
+							for _, device := range discovered {
+								if strings.ToLower(strings.TrimSpace(device.Mac)) == selectedMAC {
+									resolvedIP = device.IP
+									break
+								}
+							}
+						}
+						if resolvedIP != "" {
+							m.savedDevices[m.savedDeviceCursor].IP = resolvedIP
+							selected.IP = resolvedIP
+						}
+					}
+
 					m.ip = selected.IP
 					if selected.Port != "" {
 						m.port = selected.Port
@@ -339,6 +381,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.persistConfig()
 					m.status = fmt.Sprintf("Selected saved device: %s", selected.Name)
 					m.state = menuView
+					m.syncingState = true
+					cmds = append(cmds, syncDeviceStateCmd(m.ip, m.port), m.spinner.Tick)
 				}
 			case "d":
 				if len(m.savedDevices) > 0 {

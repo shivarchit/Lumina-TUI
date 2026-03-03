@@ -8,12 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"wiz-tui/internal/config"
+	"wiz-tui/internal/wiz"
+
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"wiz-tui/internal/config"
-	"wiz-tui/internal/wiz"
 )
 
 type sessionState int
@@ -35,6 +36,12 @@ type timerFinishedMsg struct{}
 
 type discoveryResultMsg struct {
 	devices []wiz.Device
+	err     error
+	elapsed time.Duration
+}
+
+type stateSyncResultMsg struct {
+	state   wiz.PilotState
 	err     error
 	elapsed time.Duration
 }
@@ -76,6 +83,7 @@ type model struct {
 	spinner       spinner.Model
 	timerActive   bool
 	detachedTimer bool
+	syncingState  bool
 
 	discovering        bool
 	discoveredDevices  []wiz.Device
@@ -129,7 +137,7 @@ func NewModel(cfg config.Config, needsSetup bool) model {
 		discoveredDevices:  []wiz.Device{},
 		deviceCursor:       0,
 		savedDevices:       cfg.SavedDevices,
-		savedDeviceCursor:  0,
+		syncingState:       !needsSetup && strings.TrimSpace(cfg.IP) != "" && strings.TrimSpace(cfg.Port) != "",
 		brightnessHistory:  []int{100},
 		commandLatencyMs:   []int{},
 		discoveryLatencyMs: []int{},
@@ -237,6 +245,15 @@ func discoverDevicesCmd() tea.Cmd {
 		start := time.Now()
 		devices, err := wiz.DiscoverDevices()
 		return discoveryResultMsg{devices: devices, err: err, elapsed: time.Since(start)}
+	}
+}
+
+// syncDeviceStateCmd fetches current target state asynchronously.
+func syncDeviceStateCmd(ip, port string) tea.Cmd {
+	return func() tea.Msg {
+		start := time.Now()
+		state, err := wiz.GetPilotState(ip, port)
+		return stateSyncResultMsg{state: state, err: err, elapsed: time.Since(start)}
 	}
 }
 

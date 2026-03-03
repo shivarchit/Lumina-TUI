@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -18,6 +19,13 @@ type payload struct {
 type discoveryPayload struct {
 	Method string            `json:"method"`
 	Params map[string]string `json:"params"`
+}
+
+// PilotState describes current runtime light state from getPilot.
+type PilotState struct {
+	Power      bool
+	Brightness int
+	ColorHex   string
 }
 
 // Device describes a discovered WiZ device.
@@ -149,6 +157,76 @@ func SendCommand(ip, port, method string, params map[string]interface{}) error {
 	return lastErr
 }
 
+// GetPilotState fetches current power, brightness, and RGB color from a device.
+func GetPilotState(ip, port string) (PilotState, error) {
+	request := payload{Method: "getPilot", Params: map[string]interface{}{}}
+	jsonData, err := json.Marshal(request)
+	if err != nil {
+		return PilotState{}, fmt.Errorf("failed to marshal getPilot payload: %w", err)
+	}
+
+	address := net.JoinHostPort(ip, port)
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		conn, err := net.Dial("udp", address)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to connect to %s (attempt %d): %w", address, attempt+1, err)
+			time.Sleep(time.Duration(attempt+1) * 120 * time.Millisecond)
+			continue
+		}
+
+		_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+		if _, err := conn.Write(jsonData); err != nil {
+			_ = conn.Close()
+			lastErr = fmt.Errorf("failed to send getPilot to %s (attempt %d): %w", address, attempt+1, err)
+			time.Sleep(time.Duration(attempt+1) * 120 * time.Millisecond)
+			continue
+		}
+
+		buffer := make([]byte, 4096)
+		n, err := conn.Read(buffer)
+		_ = conn.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("failed reading getPilot response from %s (attempt %d): %w", address, attempt+1, err)
+			time.Sleep(time.Duration(attempt+1) * 120 * time.Millisecond)
+			continue
+		}
+
+		var response map[string]interface{}
+		if err := json.Unmarshal(buffer[:n], &response); err != nil {
+			lastErr = fmt.Errorf("failed to decode getPilot response: %w", err)
+			continue
+		}
+
+		result, ok := response["result"].(map[string]interface{})
+		if !ok {
+			lastErr = fmt.Errorf("getPilot response missing result")
+			continue
+		}
+
+		power := asBool(result["state"])
+		brightness := asInt(result["dimming"])
+		if brightness < 0 {
+			brightness = 0
+		}
+		if brightness > 100 {
+			brightness = 100
+		}
+
+		r := asInt(result["r"])
+		g := asInt(result["g"])
+		b := asInt(result["b"])
+		colorHex := fmt.Sprintf("#%02X%02X%02X", clampColor(r), clampColor(g), clampColor(b))
+
+		return PilotState{Power: power, Brightness: brightness, ColorHex: colorHex}, nil
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("unknown getPilot failure")
+	}
+	return PilotState{}, lastErr
+}
+
 // HexToRGB converts a six-digit hex color string to RGB values.
 func HexToRGB(h string) (uint8, uint8, uint8, error) {
 	h = strings.TrimPrefix(h, "#")
@@ -218,6 +296,52 @@ func asString(value interface{}) string {
 		return strings.TrimSpace(str)
 	}
 	return strings.TrimSpace(fmt.Sprintf("%v", value))
+}
+
+func asInt(value interface{}) int {
+	switch typed := value.(type) {
+	case float64:
+		return int(typed)
+	case float32:
+		return int(typed)
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case int32:
+		return int(typed)
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(typed))
+		if err == nil {
+			return parsed
+		}
+	}
+	return 0
+}
+
+func asBool(value interface{}) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case float64:
+		return typed != 0
+	case int:
+		return typed != 0
+	case string:
+		norm := strings.ToLower(strings.TrimSpace(typed))
+		return norm == "1" || norm == "true" || norm == "on"
+	}
+	return false
+}
+
+func clampColor(value int) int {
+	if value < 0 {
+		return 0
+	}
+	if value > 255 {
+		return 255
+	}
+	return value
 }
 
 func makeFallbackName(mac, ip string) string {

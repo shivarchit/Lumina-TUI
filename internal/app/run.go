@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -74,10 +75,17 @@ func loadRuntimeConfig() (config.Config, bool) {
 		if cfg.Port == "" {
 			cfg.Port = "38899"
 		}
-		if cfg.IP == "" && len(cfg.SavedDevices) > 0 {
-			cfg.IP = cfg.SavedDevices[0].IP
-			if cfg.SavedDevices[0].Port != "" {
-				cfg.Port = cfg.SavedDevices[0].Port
+		if len(cfg.SavedDevices) > 0 {
+			resolved := resolveSavedTargetsByMAC(cfg.SavedDevices)
+			if cfg.IP == "" && len(resolved) > 0 {
+				cfg.IP = resolved[0].IP
+				if resolved[0].Port != "" {
+					cfg.Port = resolved[0].Port
+				}
+			}
+			if len(resolved) > 0 {
+				cfg.SavedDevices = resolved
+				_ = config.Save(cfg)
 			}
 		}
 		if validErr := config.Validate(cfg.IP, cfg.Port); validErr == nil {
@@ -85,7 +93,7 @@ func loadRuntimeConfig() (config.Config, bool) {
 		}
 		if len(cfg.SavedDevices) > 0 {
 			for _, saved := range cfg.SavedDevices {
-				if saved.IP == "" {
+				if saved.IP == "" || strings.TrimSpace(saved.Mac) == "" {
 					continue
 				}
 				port := saved.Port
@@ -114,4 +122,38 @@ func loadRuntimeConfig() (config.Config, bool) {
 		return cfg, true
 	}
 	return cfg, false
+}
+
+func resolveSavedTargetsByMAC(savedDevices []config.SavedDevice) []config.SavedDevice {
+	if len(savedDevices) == 0 {
+		return savedDevices
+	}
+
+	discovered, err := wiz.DiscoverDevices()
+	if err != nil {
+		return savedDevices
+	}
+
+	ipByMAC := map[string]string{}
+	for _, device := range discovered {
+		mac := strings.ToLower(strings.TrimSpace(device.Mac))
+		if mac == "" {
+			continue
+		}
+		ipByMAC[mac] = device.IP
+	}
+
+	resolved := make([]config.SavedDevice, len(savedDevices))
+	copy(resolved, savedDevices)
+	for index := range resolved {
+		mac := strings.ToLower(strings.TrimSpace(resolved[index].Mac))
+		if mac == "" {
+			continue
+		}
+		if ip, ok := ipByMAC[mac]; ok && ip != "" {
+			resolved[index].IP = ip
+		}
+	}
+
+	return resolved
 }

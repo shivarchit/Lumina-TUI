@@ -1,19 +1,35 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Extract version from internal/version/version.go
-VERSION=$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' internal/version/version.go)
+set -euo pipefail
 
-if [ -z "$VERSION" ]; then
-    echo "❌ Could not find version in version.go"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$ROOT_DIR"
+
+TARGET="${1:-all}"
+
+VERSION="$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' internal/version/version.go | head -n 1)"
+if [[ -z "$VERSION" ]]; then
+    echo "Could not find version in internal/version/version.go"
     exit 1
 fi
 
-echo "🚀 Releasing $VERSION..."
-rm -rf dist && mkdir -p dist
+if ! command -v go >/dev/null 2>&1; then
+    echo "Go is required but was not found in PATH"
+    exit 1
+fi
 
-# Build for multiple platforms
+if ! command -v gh >/dev/null 2>&1; then
+    echo "GitHub CLI (gh) is required for release upload"
+    exit 1
+fi
+
+echo "Releasing $VERSION (target=$TARGET)"
+rm -rf dist
+mkdir -p dist
+
 PLATFORMS=(
-    "darwin/amd64:lumina-mac-arm64"
+    "darwin/amd64:lumina-mac-x64"
     "darwin/arm64:lumina-mac-arm64"
     "linux/amd64:lumina-linux-x64"
     "linux/arm:lumina-linux-arm"
@@ -22,44 +38,59 @@ PLATFORMS=(
     "freebsd/amd64:lumina-freebsd-x64"
 )
 
-echo "📦 Building for multiple platforms..."
+echo "Building binaries..."
+built_any="false"
 for platform in "${PLATFORMS[@]}"; do
     IFS=':' read -r goos_goarch output <<< "$platform"
     IFS='/' read -r goos goarch <<< "$goos_goarch"
 
-    echo "Building for $goos/$goarch -> $output"
-    GOOS=$goos GOARCH=$goarch go build -ldflags "-s -w" -o "dist/$output" ./internal
-
-    if [ $? -ne 0 ]; then
-        echo "❌ Build failed for $goos/$goarch"
-        exit 1
+    if [[ "$TARGET" != "all" && "$TARGET" != "$goos_goarch" ]]; then
+        continue
     fi
+
+    built_any="true"
+    echo "  - $goos/$goarch -> $output"
+    GOOS="$goos" GOARCH="$goarch" go build -ldflags "-s -w" -o "dist/$output" ./internal
 done
 
-# Create checksums
-echo "🔐 Generating checksums..."
-cd dist
-sha256sum * > checksums.txt
-cd ..
-
-# Create release archive
-echo "📦 Creating release archive..."
-tar -czf "lumina-tui-$VERSION.tar.gz" dist/
-
-# Git operations
-if [ -n "$(git status --porcelain)" ]; then
-    echo "⚠️  Working directory not clean. Please commit changes first."
+if [[ "$built_any" != "true" ]]; then
+    echo "No matching build target for '$TARGET'. Use 'all' or one of:"
+    for platform in "${PLATFORMS[@]}"; do
+        IFS=':' read -r goos_goarch _ <<< "$platform"
+        echo "  - $goos_goarch"
+    done
     exit 1
 fi
 
-echo "🏷️  Tagging release..."
-git tag -a "$VERSION" -m "Release $VERSION"
+echo "Generating checksums..."
+(cd dist && sha256sum * > checksums.txt)
 
-echo "✅ Release $VERSION ready!"
-echo "📁 Files created in dist/ directory"
-echo "📋 Checksums in dist/checksums.txt"
-echo "📦 Archive: lumina-tui-$VERSION.tar.gz"
-echo ""
-echo "To publish:"
-echo "  git push origin $VERSION"
-echo "  gh release create $VERSION --title \"$VERSION\" --notes \"Release $VERSION\" lumina-tui-$VERSION.tar.gz"
+ARCHIVE="lumina-tui-$VERSION.tar.gz"
+echo "Creating archive $ARCHIVE..."
+tar -czf "$ARCHIVE" dist/
+
+echo "Ensuring git tag $VERSION exists..."
+if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null 2>&1; then
+    echo "  - Tag already exists locally"
+else
+    git tag -a "$VERSION" -m "Release $VERSION"
+    echo "  - Created local tag $VERSION"
+fi
+
+if git ls-remote --exit-code --tags origin "$VERSION" >/dev/null 2>&1; then
+    echo "  - Tag already exists on origin"
+else
+    git push origin "$VERSION"
+    echo "  - Pushed tag $VERSION to origin"
+fi
+
+echo "Publishing artifacts to GitHub Release..."
+if gh release view "$VERSION" >/dev/null 2>&1; then
+    gh release upload "$VERSION" dist/* "$ARCHIVE" --clobber
+    echo "  - Uploaded assets to existing release $VERSION"
+else
+    gh release create "$VERSION" dist/* "$ARCHIVE" --title "$VERSION" --notes "Release $VERSION"
+    echo "  - Created release $VERSION and uploaded assets"
+fi
+
+echo "Done. Artifacts are available in GitHub Releases for $VERSION"
