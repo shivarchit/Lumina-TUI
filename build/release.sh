@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
 set -euo pipefail
 
@@ -7,6 +7,26 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT_DIR"
 
 TARGET="${1:-all}"
+DRY_RUN="${2:-false}"
+
+if [[ "$TARGET" == "--dry-run" ]]; then
+    TARGET="all"
+    DRY_RUN="true"
+fi
+
+if [[ "$DRY_RUN" == "--dry-run" ]]; then
+    DRY_RUN="true"
+fi
+
+if [[ "$TARGET" == "--help" || "$TARGET" == "-h" ]]; then
+    echo "Usage: build/release.sh [all|goos/goarch] [--dry-run]"
+    echo "Examples:"
+    echo "  build/release.sh"
+    echo "  build/release.sh all"
+    echo "  build/release.sh linux/amd64"
+    echo "  build/release.sh all --dry-run"
+    exit 0
+fi
 
 VERSION="$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' internal/version/version.go | head -n 1)"
 if [[ -z "$VERSION" ]]; then
@@ -24,7 +44,13 @@ if ! command -v gh >/dev/null 2>&1; then
     exit 1
 fi
 
-echo "Releasing $VERSION (target=$TARGET)"
+if [[ "$DRY_RUN" != "true" && "$DRY_RUN" != "false" ]]; then
+    echo "Invalid dry-run flag: $DRY_RUN"
+    echo "Use --dry-run as the second argument when needed"
+    exit 1
+fi
+
+echo "Releasing $VERSION (target=$TARGET, dry-run=$DRY_RUN)"
 rm -rf dist
 mkdir -p dist
 
@@ -63,7 +89,14 @@ if [[ "$built_any" != "true" ]]; then
 fi
 
 echo "Generating checksums..."
-(cd dist && sha256sum * > checksums.txt)
+if command -v sha256sum >/dev/null 2>&1; then
+    (cd dist && sha256sum * > checksums.txt)
+elif command -v shasum >/dev/null 2>&1; then
+    (cd dist && shasum -a 256 * > checksums.txt)
+else
+    echo "No checksum utility found. Install 'sha256sum' or 'shasum'."
+    exit 1
+fi
 
 ARCHIVE="lumina-tui-$VERSION.tar.gz"
 echo "Creating archive $ARCHIVE..."
@@ -73,24 +106,40 @@ echo "Ensuring git tag $VERSION exists..."
 if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null 2>&1; then
     echo "  - Tag already exists locally"
 else
-    git tag -a "$VERSION" -m "Release $VERSION"
-    echo "  - Created local tag $VERSION"
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "  - DRY RUN: would create local tag $VERSION"
+    else
+        git tag -a "$VERSION" -m "Release $VERSION"
+        echo "  - Created local tag $VERSION"
+    fi
 fi
 
 if git ls-remote --exit-code --tags origin "$VERSION" >/dev/null 2>&1; then
     echo "  - Tag already exists on origin"
 else
-    git push origin "$VERSION"
-    echo "  - Pushed tag $VERSION to origin"
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "  - DRY RUN: would push tag $VERSION to origin"
+    else
+        git push origin "$VERSION"
+        echo "  - Pushed tag $VERSION to origin"
+    fi
 fi
 
 echo "Publishing artifacts to GitHub Release..."
-if gh release view "$VERSION" >/dev/null 2>&1; then
-    gh release upload "$VERSION" dist/* "$ARCHIVE" --clobber
-    echo "  - Uploaded assets to existing release $VERSION"
+if [[ "$DRY_RUN" == "true" ]]; then
+    if gh release view "$VERSION" >/dev/null 2>&1; then
+        echo "  - DRY RUN: would upload assets to existing release $VERSION"
+    else
+        echo "  - DRY RUN: would create release $VERSION and upload assets"
+    fi
 else
-    gh release create "$VERSION" dist/* "$ARCHIVE" --title "$VERSION" --notes "Release $VERSION"
-    echo "  - Created release $VERSION and uploaded assets"
+    if gh release view "$VERSION" >/dev/null 2>&1; then
+        gh release upload "$VERSION" dist/* "$ARCHIVE" --clobber
+        echo "  - Uploaded assets to existing release $VERSION"
+    else
+        gh release create "$VERSION" dist/* "$ARCHIVE" --title "$VERSION" --notes "Release $VERSION"
+        echo "  - Created release $VERSION and uploaded assets"
+    fi
 fi
 
 echo "Done. Artifacts are available in GitHub Releases for $VERSION"

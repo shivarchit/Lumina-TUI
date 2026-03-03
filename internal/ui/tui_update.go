@@ -29,6 +29,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		if msg.Width > 0 {
+			m.windowWidth = msg.Width
+		}
+		if msg.Height > 0 {
+			m.windowHeight = msg.Height
+		}
+		return m, nil
 	case spinner.TickMsg:
 		if m.timerActive || m.discovering || m.syncingState {
 			m.spinner, cmd = m.spinner.Update(msg)

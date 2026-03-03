@@ -199,6 +199,49 @@ GitHub Actions runs tests automatically on push to `main` and on pull requests.
 
 ---
 
+## Releases
+
+Separate release scripts are available for Unix and Windows.
+
+Unix (macOS/Linux):
+
+```bash
+bash build/release.sh
+```
+
+Unix dry run (build + package only, no tag push/release upload):
+
+```bash
+bash build/release.sh all --dry-run
+```
+
+Windows (PowerShell):
+
+```powershell
+.\build\release.ps1
+```
+
+Windows dry run (build + package only, no tag push/release upload):
+
+```powershell
+.\build\release.ps1 -Target all -DryRun
+```
+
+Optional single-target build:
+
+- Unix: `bash build/release.sh linux/amd64`
+- Windows: `.\build\release.ps1 -Target linux/amd64`
+
+Both scripts:
+
+- build binaries into `dist/`
+- generate `checksums.txt`
+- create an archive
+- ensure/push the git tag from `internal/version/version.go`
+- upload assets to GitHub Releases using `gh`
+
+---
+
 ## How it works
 
 WiZ devices expose a local UDP API. Lumina-TUI sends structured JSON payloads directly to port `38899`.

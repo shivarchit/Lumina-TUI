@@ -100,6 +100,8 @@ type model struct {
 	brightnessHistory  []int
 	commandLatencyMs   []int
 	discoveryLatencyMs []int
+	windowWidth        int
+	windowHeight       int
 }
 
 // NewModel creates the first TUI model from runtime config.
@@ -125,7 +127,7 @@ func NewModel(cfg config.Config, needsSetup bool) model {
 		state:              state,
 		setupStep:          0,
 		choices:            []string{"Toggle Power", "Color Grid", "Hex Colors", "Brightness", "Sleep Timer", "Discover Devices", "Saved Devices", "Help", "Exit"},
-		icons:              []string{"⚡", "🎨", "✍️", "☀️", "⏱️", "🔍", "💾", "❓", "🚪"},
+		icons:              []string{"PWR", "CLR", "HEX", "BRT", "TMR", "DSC", "SAV", "HLP", "EXT"},
 		status:             "Ready.",
 		ip:                 cfg.IP,
 		port:               cfg.Port,
@@ -141,6 +143,8 @@ func NewModel(cfg config.Config, needsSetup bool) model {
 		brightnessHistory:  []int{100},
 		commandLatencyMs:   []int{},
 		discoveryLatencyMs: []int{},
+		windowWidth:        120,
+		windowHeight:       36,
 	}
 }
 
@@ -405,6 +409,13 @@ func (m model) renderDashboard() string {
 		latestCmdLatency = m.commandLatencyMs[len(m.commandLatencyMs)-1]
 	}
 
+	latencyColor := green
+	if latestCmdLatency >= 250 {
+		latencyColor = red
+	} else if latestCmdLatency >= 120 {
+		latencyColor = mauve
+	}
+
 	discoveryRate := 0
 	if m.discoveryRuns > 0 {
 		discoveryRate = (m.lastDiscoveryCount * 100) / 10
@@ -419,11 +430,17 @@ func (m model) renderDashboard() string {
 		aliasLine = fmt.Sprintf("Alias    %s", targetAlias)
 	}
 
+	colorSwatch := lipgloss.NewStyle().
+		Background(lipgloss.Color(m.currentColor)).
+		Foreground(base).
+		Padding(0, 2).
+		Render("  ")
+
 	core := metricBlock("Core", []string{
 		fmt.Sprintf("Power    %s", powerStyle.Bold(true).Render(powerState)),
 		fmt.Sprintf("Target   %s:%s", m.ip, m.port),
 		aliasLine,
-		fmt.Sprintf("Color    %s", lipgloss.NewStyle().Foreground(mauve).Render(m.currentColor)),
+		fmt.Sprintf("Color    %s %s", colorSwatch, lipgloss.NewStyle().Foreground(mauve).Render(m.currentColor)),
 	}, blue, 34)
 
 	brightnessBlock := metricBlock("Brightness", []string{
@@ -435,7 +452,7 @@ func (m model) renderDashboard() string {
 	commandBlock := metricBlock("Command Health", []string{
 		lipgloss.NewStyle().Foreground(green).Render(bar(successRate, 100, 22)),
 		fmt.Sprintf("OK/Fail  %d/%d", successCount, m.commandFailed),
-		fmt.Sprintf("Latency  %dms", latestCmdLatency),
+		fmt.Sprintf("Latency  %s", lipgloss.NewStyle().Foreground(latencyColor).Bold(true).Render(fmt.Sprintf("%dms", latestCmdLatency))),
 		lipgloss.NewStyle().Foreground(blue).Render(sparkline(m.commandLatencyMs, 22)),
 	}, green, 34)
 

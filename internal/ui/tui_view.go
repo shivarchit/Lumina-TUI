@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"wiz-tui/internal/version"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // View renders the complete application UI for the current model state.
@@ -31,24 +32,39 @@ func (m model) View() string {
 		return "\n" + box.Render(content) + "\n"
 	}
 
-	borderColor := surface
-	if m.isOn {
-		borderColor = mauve
+	narrow := m.windowWidth > 0 && m.windowWidth < 118
+	leftWidth := 62
+	rightWidth := 44
+	panelHeight := 24
+	cardWidth := 54
+	if narrow {
+		leftWidth = maxInt(52, m.windowWidth-8)
+		rightWidth = leftWidth
+		panelHeight = 20
+	}
+	if leftWidth > 10 {
+		cardWidth = leftWidth - 8
+	}
+
+	activeBorder := mauve
+	inactiveBorder := lipgloss.Color("#45475A")
+	if !m.isOn {
+		activeBorder = blue
 	}
 
 	leftPanelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
+		BorderForeground(activeBorder).
 		Padding(1, 2).
-		Width(62).
-		Height(24)
+		Width(leftWidth).
+		Height(panelHeight)
 
 	rightPanelStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(surface).
+		BorderForeground(inactiveBorder).
 		Padding(1, 2).
-		Width(44).
-		Height(24)
+		Width(rightWidth).
+		Height(panelHeight)
 
 	itemStyle := lipgloss.NewStyle().Foreground(subtext).PaddingLeft(1)
 	selectedStyle := lipgloss.NewStyle().Foreground(mauve).Bold(true).PaddingLeft(1)
@@ -60,9 +76,9 @@ func (m model) View() string {
 		for i, choice := range m.choices {
 			icon := m.icons[i]
 			if m.cursor == i {
-				leftPanel += selectedStyle.Render(fmt.Sprintf("┃ %s  %s", icon, choice)) + "\n"
+				leftPanel += selectedStyle.Render(fmt.Sprintf("> %-3s %s", icon, choice)) + "\n"
 			} else {
-				leftPanel += itemStyle.Render(fmt.Sprintf("  %s  %s", icon, choice)) + "\n"
+				leftPanel += itemStyle.Render(fmt.Sprintf("  %-3s %s", icon, choice)) + "\n"
 			}
 		}
 		leftPanel += "\n"
@@ -74,7 +90,7 @@ func (m model) View() string {
 			bg := lipgloss.Color(c.hex)
 			fg := lipgloss.Color("#11111B")
 			if m.colorCursor == i {
-				text = "▶ " + text
+				text = "> " + text
 			} else {
 				text = "  " + text
 			}
@@ -85,15 +101,24 @@ func (m model) View() string {
 			}
 		}
 	case hexInputView:
-		leftPanel = sectionHeader("Hex Input", "Custom color") + "\n\n" + m.textInput.View()
+		swatch := lipgloss.NewStyle().Background(lipgloss.Color(m.currentColor)).Foreground(base).Padding(0, 3).Render("   ")
+		leftPanel = sectionHeader("Hex Input", "Custom color") + "\n\n"
+		leftPanel += "Current " + swatch + " " + lipgloss.NewStyle().Foreground(mauve).Render(m.currentColor) + "\n\n"
+		leftPanel += m.textInput.View() + "\n\n"
+		leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("Enter to apply · Esc to cancel")
 	case brightnessView:
 		leftPanel = sectionHeader("Brightness", "Fine control") + "\n\n"
-		bars := m.brightness / 10
-		slider := strings.Repeat("━", bars) + "┫" + strings.Repeat("┈", 10-bars)
-		coloredSlider := lipgloss.NewStyle().Foreground(mauve).Render(slider)
-		leftPanel += fmt.Sprintf("%s %d%%", coloredSlider, m.brightness)
+		leftPanel += lipgloss.NewStyle().Foreground(mauve).Render(bar(m.brightness, 100, 28)) + "\n"
+		leftPanel += lipgloss.NewStyle().Foreground(blue).Render(sparkline(m.brightnessHistory, 28)) + "\n"
+		leftPanel += fmt.Sprintf("Level  %d%%\n\n", m.brightness)
+		leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("Left/Right to adjust · Enter/Esc to return")
 	case timerInputView:
-		leftPanel = sectionHeader("Sleep Timer", "Minutes") + "\n\n" + m.textInput.View()
+		leftPanel = sectionHeader("Sleep Timer", "Minutes") + "\n\n"
+		leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("Set minutes until automatic power off") + "\n\n"
+		leftPanel += m.textInput.View() + "\n\n"
+		if m.timerActive {
+			leftPanel += lipgloss.NewStyle().Foreground(blue).Render("Timer running in background")
+		}
 	case helpView:
 		leftPanel = sectionHeader("Help", "Key reference") + "\n\n" +
 			lipgloss.NewStyle().Foreground(textCol).Render("Navigation:\n") +
@@ -120,28 +145,22 @@ func (m model) View() string {
 		if len(m.discoveredDevices) == 0 {
 			leftPanel += "No bulbs found yet.\nPress 'r' to rescan."
 		} else {
-			leftPanel += lipgloss.NewStyle().Foreground(textCol).Bold(true).Render("Name               IP              MAC\n")
-			leftPanel += lipgloss.NewStyle().Foreground(surface).Render(strings.Repeat("─", 56)) + "\n"
+			leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("Choose a device and press Enter") + "\n\n"
 			for i, device := range m.discoveredDevices {
-				prefix := "  "
-				style := lipgloss.NewStyle().Foreground(subtext)
-				if i%2 == 1 {
-					style = style.Foreground(textCol)
-				}
+				style := lipgloss.NewStyle().Foreground(textCol)
 				if i == m.deviceCursor {
-					prefix = "▶ "
 					style = lipgloss.NewStyle().Foreground(mauve).Bold(true)
 				}
-				name := device.Name
-				if len(name) > 16 {
-					name = name[:16]
-				}
+				name := clipText(device.Name, 20)
 				mac := device.Mac
 				if mac == "" {
 					mac = "-"
 				}
-				row := fmt.Sprintf("%s%-16s %-15s %s", prefix, name, device.IP, mac)
-				leftPanel += style.Render(row) + "\n"
+				stateLabel := "unknown"
+				if device.IP == m.ip {
+					stateLabel = "active"
+				}
+				leftPanel += renderDeviceCard(name, device.IP, mac, stateLabel, style, i == m.deviceCursor, cardWidth) + "\n"
 			}
 			leftPanel += "\nEnter select · s save name · r refresh"
 		}
@@ -150,28 +169,22 @@ func (m model) View() string {
 		if len(m.savedDevices) == 0 {
 			leftPanel += "No saved devices yet.\nDiscover a bulb and press 's' to save."
 		} else {
-			leftPanel += lipgloss.NewStyle().Foreground(textCol).Bold(true).Render("Name               IP              Port\n")
-			leftPanel += lipgloss.NewStyle().Foreground(surface).Render(strings.Repeat("─", 56)) + "\n"
+			leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("Enter to target · d to delete") + "\n\n"
 			for i, device := range m.savedDevices {
-				prefix := "  "
-				style := lipgloss.NewStyle().Foreground(subtext)
-				if i%2 == 1 {
-					style = style.Foreground(textCol)
-				}
+				style := lipgloss.NewStyle().Foreground(textCol)
 				if i == m.savedDeviceCursor {
-					prefix = "▶ "
 					style = lipgloss.NewStyle().Foreground(mauve).Bold(true)
 				}
-				name := device.Name
-				if len(name) > 16 {
-					name = name[:16]
-				}
+				name := clipText(device.Name, 20)
 				port := device.Port
 				if port == "" {
 					port = m.port
 				}
-				row := fmt.Sprintf("%s%-16s %-15s %s", prefix, name, device.IP, port)
-				leftPanel += style.Render(row) + "\n"
+				mac := device.Mac
+				if mac == "" {
+					mac = "-"
+				}
+				leftPanel += renderDeviceCard(name, device.IP+":"+port, mac, "saved", style, i == m.savedDeviceCursor, cardWidth) + "\n"
 			}
 			leftPanel += "\nEnter select · d delete · Esc back"
 		}
@@ -182,16 +195,19 @@ func (m model) View() string {
 	}
 
 	rightPanel := m.renderDashboard()
-	actionBlock := metricBlock("Action Feed", []string{m.status}, mauve, 34)
+	actionBlock := renderStatusBlock(m.status, rightWidth-10)
 	rightPanel += "\n" + actionBlock
 
 	if m.timerActive {
 		rightPanel += fmt.Sprintf("\n%s %s", m.spinner.View(), lipgloss.NewStyle().Foreground(blue).Render("Timer Active"))
 	}
 
-	leftBox := leftPanelStyle.Render(leftPanel)
-	rightBox := rightPanelStyle.Render(rightPanel)
+	leftBox := leftPanelStyle.Render(strings.TrimSpace(leftPanel))
+	rightBox := rightPanelStyle.Render(strings.TrimSpace(rightPanel))
 	mainUI := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, rightBox)
+	if narrow {
+		mainUI = lipgloss.JoinVertical(lipgloss.Left, leftBox, rightBox)
+	}
 
 	modeStr := " NORMAL "
 	modeBg := blue
@@ -212,4 +228,73 @@ func (m model) View() string {
 
 	statusBar := lipgloss.JoinHorizontal(lipgloss.Top, modeBadge, infoBadge, deviceBadge, healthBadge, versionBadge)
 	return "\n" + mainUI + "\n" + statusBar + "\n"
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func clipText(value string, limit int) string {
+	if limit <= 0 || len(value) <= limit {
+		return value
+	}
+	if limit <= 1 {
+		return value[:limit]
+	}
+	return value[:limit-1] + "…"
+}
+
+func renderDeviceCard(name, endpoint, mac, stateLabel string, style lipgloss.Style, selected bool, width int) string {
+	border := surface
+	if selected {
+		border = mauve
+	}
+	card := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(border).
+		Padding(0, 1).
+		Width(width)
+
+	stateColor := subtext
+	if stateLabel == "active" {
+		stateColor = green
+	}
+	if stateLabel == "saved" {
+		stateColor = blue
+	}
+	state := lipgloss.NewStyle().Foreground(stateColor).Bold(true).Render(strings.ToUpper(stateLabel))
+
+	body := style.Render(name) + "  " + state + "\n" +
+		lipgloss.NewStyle().Foreground(subtext).Render(endpoint) + "\n" +
+		lipgloss.NewStyle().Foreground(subtext).Render("MAC "+mac)
+
+	return card.Render(body)
+}
+
+func renderStatusBlock(status string, width int) string {
+	label := "Info"
+	accent := blue
+	textStyle := lipgloss.NewStyle().Foreground(textCol)
+	lower := strings.ToLower(status)
+
+	switch {
+	case strings.Contains(lower, "fail"), strings.Contains(lower, "error"), strings.Contains(lower, "invalid"):
+		label = "Error"
+		accent = red
+		textStyle = lipgloss.NewStyle().Foreground(red)
+	case strings.Contains(lower, "saved"), strings.Contains(lower, "complete"), strings.Contains(lower, "synced"), strings.Contains(lower, "on"):
+		label = "Success"
+		accent = green
+		textStyle = lipgloss.NewStyle().Foreground(green)
+	case strings.Contains(lower, "scan"), strings.Contains(lower, "timer"), strings.Contains(lower, "selected"):
+		label = "Info"
+		accent = blue
+	}
+
+	badge := lipgloss.NewStyle().Background(accent).Foreground(base).Bold(true).Padding(0, 1).Render(label)
+	line := badge + " " + textStyle.Render(status)
+	return metricBlock("Action Feed", []string{line}, accent, width)
 }
