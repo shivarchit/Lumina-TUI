@@ -63,7 +63,7 @@ func DiscoverDevices() ([]Device, error) {
 		time.Sleep(150 * time.Millisecond)
 	}
 
-	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(1500 * time.Millisecond))
 
 	devicesByKey := make(map[string]Device)
 	buffer := make([]byte, 2048)
@@ -116,6 +116,82 @@ func DiscoverDevices() ([]Device, error) {
 	})
 
 	return devices, nil
+}
+
+// DiscoverDeviceByMAC broadcasts a discovery packet and returns the first device
+// whose MAC matches targetMac. It returns as soon as a match is found, making
+// it far faster than a full scan (~15-50ms vs 1500ms).
+func DiscoverDeviceByMAC(targetMac, port string, timeout time.Duration) (Device, error) {
+	normalizedTarget := strings.ToLower(strings.TrimSpace(targetMac))
+	if normalizedTarget == "" {
+		return Device{}, fmt.Errorf("targetMac cannot be empty")
+	}
+
+	portNum := 38899
+	if p, err := strconv.Atoi(port); err == nil && p > 0 {
+		portNum = p
+	}
+
+	listenAddr := &net.UDPAddr{IP: net.IPv4zero, Port: 0}
+	conn, err := net.ListenUDP("udp4", listenAddr)
+	if err != nil {
+		return Device{}, fmt.Errorf("failed to create discovery socket: %w", err)
+	}
+	defer conn.Close()
+
+	_ = conn.SetWriteBuffer(8 * 1024)
+	_ = conn.SetReadBuffer(16 * 1024)
+
+	discovery := discoveryPayload{Method: "getSystemConfig", Params: map[string]string{}}
+	jsonData, err := json.Marshal(discovery)
+	if err != nil {
+		return Device{}, fmt.Errorf("failed to marshal discovery payload: %w", err)
+	}
+
+	targets := discoveryTargets(portNum)
+	for _, target := range targets {
+		_, _ = conn.WriteToUDP(jsonData, target)
+	}
+
+	if timeout <= 0 {
+		timeout = 1500 * time.Millisecond
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(timeout))
+
+	buffer := make([]byte, 2048)
+	for {
+		n, addr, err := conn.ReadFromUDP(buffer)
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				break
+			}
+			return Device{}, fmt.Errorf("error reading discovery response: %w", err)
+		}
+
+		var response map[string]interface{}
+		if err := json.Unmarshal(buffer[:n], &response); err != nil {
+			continue
+		}
+
+		if result, ok := response["result"].(map[string]interface{}); ok {
+			mac := strings.ToLower(strings.TrimSpace(asString(result["mac"])))
+			if mac != normalizedTarget {
+				continue
+			}
+			name := asString(result["moduleName"])
+			model := asString(result["moduleName"])
+			firmware := asString(result["fwVersion"])
+			if name == "" {
+				name = asString(result["deviceName"])
+			}
+			if name == "" {
+				name = makeFallbackName(mac, addr.IP.String())
+			}
+			return Device{IP: addr.IP.String(), Mac: mac, Name: name, Model: model, Firmware: firmware}, nil
+		}
+	}
+
+	return Device{}, fmt.Errorf("device with MAC %s not found on local network", targetMac)
 }
 
 // SendCommand sends a UDP command payload with retries and timeout handling.

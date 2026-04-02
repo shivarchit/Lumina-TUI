@@ -25,6 +25,7 @@ const (
 	colorPickerView
 	hexInputView
 	brightnessView
+	colorTempView
 	timerInputView
 	discoveryView
 	savedDevicesView
@@ -44,6 +45,11 @@ type stateSyncResultMsg struct {
 	state   wiz.PilotState
 	err     error
 	elapsed time.Duration
+}
+
+type macResolutionResultMsg struct {
+	device wiz.Device
+	err    error
 }
 
 var (
@@ -100,6 +106,10 @@ type model struct {
 	brightnessHistory  []int
 	commandLatencyMs   []int
 	discoveryLatencyMs []int
+	activeMac          string
+	statusLog          []string
+	lastKeyWasG        bool
+	colorTemp          int
 	windowWidth        int
 	windowHeight       int
 }
@@ -123,24 +133,36 @@ func NewModel(cfg config.Config, needsSetup bool) model {
 		ti.Focus()
 	}
 
+	initColor := "#CBA6F7"
+	if cfg.LastColor != "" {
+		initColor = cfg.LastColor
+	}
+	initBrightness := 100
+	if cfg.LastBrightness > 0 {
+		initBrightness = cfg.LastBrightness
+	}
+
 	return model{
 		state:              state,
 		setupStep:          0,
-		choices:            []string{"Toggle Power", "Color Grid", "Hex Colors", "Brightness", "Sleep Timer", "Discover Devices", "Saved Devices", "Help", "Exit"},
-		icons:              []string{"PWR", "CLR", "HEX", "BRT", "TMR", "DSC", "SAV", "HLP", "EXT"},
+		choices:            []string{"Toggle Power", "Color Grid", "Hex Colors", "Brightness", "Color Temp", "Sleep Timer", "Discover Devices", "Saved Devices", "Help", "Exit"},
+		icons:              []string{"PWR", "CLR", "HEX", "BRT", "CCT", "TMR", "DSC", "SAV", "HLP", "EXT"},
 		status:             "Ready.",
+		statusLog:          []string{"Ready."},
 		ip:                 cfg.IP,
 		port:               cfg.Port,
+		activeMac:          activeMac(cfg),
 		isOn:               true,
-		currentColor:       "#CBA6F7",
-		brightness:         100,
+		currentColor:       initColor,
+		brightness:         initBrightness,
+		colorTemp:          4000,
 		textInput:          ti,
 		spinner:            s,
 		discoveredDevices:  []wiz.Device{},
 		deviceCursor:       0,
 		savedDevices:       cfg.SavedDevices,
 		syncingState:       !needsSetup && strings.TrimSpace(cfg.IP) != "" && strings.TrimSpace(cfg.Port) != "",
-		brightnessHistory:  []int{100},
+		brightnessHistory:  []int{initBrightness},
 		commandLatencyMs:   []int{},
 		discoveryLatencyMs: []int{},
 		windowWidth:        120,
@@ -148,9 +170,37 @@ func NewModel(cfg config.Config, needsSetup bool) model {
 	}
 }
 
-// persistConfig saves current target and saved devices to config storage.
+// activeMac returns the MAC for the currently selected device, if any.
+func activeMac(cfg config.Config) string {
+	for _, saved := range cfg.SavedDevices {
+		if saved.IP == cfg.IP && strings.TrimSpace(saved.Mac) != "" {
+			return strings.ToLower(strings.TrimSpace(saved.Mac))
+		}
+	}
+	// fallback: first saved device with a MAC
+	if len(cfg.SavedDevices) > 0 && strings.TrimSpace(cfg.SavedDevices[0].Mac) != "" {
+		return strings.ToLower(strings.TrimSpace(cfg.SavedDevices[0].Mac))
+	}
+	return ""
+}
+
+// persistConfig saves current target, saved devices, and last known state to disk.
 func (m *model) persistConfig() {
-	_ = config.Save(config.Config{IP: m.ip, Port: m.port, SavedDevices: m.savedDevices})
+	_ = config.Save(config.Config{
+		Version:        1,
+		IP:             m.ip,
+		Port:           m.port,
+		SavedDevices:   m.savedDevices,
+		LastColor:      m.currentColor,
+		LastBrightness: m.brightness,
+	})
+}
+
+// pushStatus updates the current status and appends it to the bounded history log.
+func pushStatus(m model, s string) model {
+	m.status = s
+	m.statusLog = appendBoundedStr(m.statusLog, s, 8)
+	return m
 }
 
 // upsertSavedDevice inserts or updates a saved device record keyed by MAC.
@@ -261,6 +311,15 @@ func syncDeviceStateCmd(ip, port string) tea.Cmd {
 	}
 }
 
+// resolveDeviceCmd broadcasts and returns as soon as the target MAC responds.
+// On success it chains into a state sync automatically via the Update loop.
+func resolveDeviceCmd(mac, port string) tea.Cmd {
+	return func() tea.Msg {
+		device, err := wiz.DiscoverDeviceByMAC(mac, port, 1500*time.Millisecond)
+		return macResolutionResultMsg{device: device, err: err}
+	}
+}
+
 // startDetachedTimer launches a detached worker process for timer actions.
 func startDetachedTimer(mins int, ip, port string) error {
 	exe, err := os.Executable()
@@ -286,6 +345,18 @@ func (m *model) recordCommand(latency time.Duration, err error) {
 
 // appendBounded appends to a history slice and keeps it capped.
 func appendBounded(history []int, value, maxLen int) []int {
+	if maxLen <= 0 {
+		return history
+	}
+	history = append(history, value)
+	if len(history) > maxLen {
+		history = history[len(history)-maxLen:]
+	}
+	return history
+}
+
+// appendBoundedStr appends to a string history slice and keeps it capped.
+func appendBoundedStr(history []string, value string, maxLen int) []string {
 	if maxLen <= 0 {
 		return history
 	}

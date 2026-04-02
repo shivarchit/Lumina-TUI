@@ -17,7 +17,11 @@ import (
 // Init configures startup commands for text input and spinner.
 func (m model) Init() tea.Cmd {
 	cmds := []tea.Cmd{textinput.Blink, m.spinner.Tick}
-	if m.state != setupView && m.ip != "" && m.port != "" {
+	if m.state != setupView && m.activeMac != "" {
+		// Resolve IP via MAC in the background for instant boot
+		m.syncingState = true
+		cmds = append(cmds, resolveDeviceCmd(m.activeMac, m.port), m.spinner.Tick)
+	} else if m.state != setupView && m.ip != "" && m.port != "" {
 		cmds = append(cmds, syncDeviceStateCmd(m.ip, m.port))
 	}
 	return tea.Batch(cmds...)
@@ -46,15 +50,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.timerActive = false
 		m.isOn = false
 		if m.detachedTimer {
-			m.status = "Timer finished (handled in background)"
+			m = pushStatus(m, "Timer finished (handled in background)")
 		} else {
 			start := time.Now()
 			err := wiz.SendCommand(m.ip, m.port, "setState", map[string]interface{}{"state": false})
 			m.recordCommand(time.Since(start), err)
 			if err != nil {
-				m.status = fmt.Sprintf("Timer finished. Power off failed: %v", err)
+				m = pushStatus(m, fmt.Sprintf("Timer finished. Power off failed: %v", err))
 			} else {
-				m.status = "Timer finished. Power off."
+				m = pushStatus(m, "Timer finished. Power off.")
 			}
 		}
 		return m, nil
@@ -64,7 +68,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastDiscoveryMs = int(msg.elapsed.Milliseconds())
 		m.discoveryLatencyMs = appendBounded(m.discoveryLatencyMs, m.lastDiscoveryMs, 30)
 		if msg.err != nil {
-			m.status = fmt.Sprintf("Discovery failed: %v", msg.err)
+			m = pushStatus(m, fmt.Sprintf("Discovery failed: %v", msg.err))
 			return m, nil
 		}
 		m.discoveredDevices = msg.devices
@@ -72,18 +76,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastDiscoveryCount = len(msg.devices)
 		if len(m.discoveredDevices) == 0 {
 			m.deviceCursor = 0
-			m.status = "Discovery complete: no bulbs found"
+			m = pushStatus(m, "Discovery complete: no bulbs found")
 		} else {
 			if m.deviceCursor >= len(m.discoveredDevices) {
 				m.deviceCursor = len(m.discoveredDevices) - 1
 			}
-			m.status = fmt.Sprintf("Discovery complete: %d bulb(s)", len(m.discoveredDevices))
+			m = pushStatus(m, fmt.Sprintf("Discovery complete: %d bulb(s)", len(m.discoveredDevices)))
 		}
 	case stateSyncResultMsg:
 		m.syncingState = false
 		m.commandLatencyMs = appendBounded(m.commandLatencyMs, int(msg.elapsed.Milliseconds()), 30)
 		if msg.err != nil {
-			m.status = fmt.Sprintf("State sync failed: %v", msg.err)
+			m = pushStatus(m, fmt.Sprintf("State sync failed: %v", msg.err))
 			return m, nil
 		}
 		m.isOn = msg.state.Power
@@ -94,8 +98,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.TrimSpace(msg.state.ColorHex) != "" {
 			m.currentColor = msg.state.ColorHex
 		}
-		m.status = "State synced"
+		m = pushStatus(m, "State synced")
 		return m, nil
+	case macResolutionResultMsg:
+		if msg.err != nil {
+			m.syncingState = false
+			if m.ip != "" && m.port != "" {
+				m.syncingState = true
+				return m, syncDeviceStateCmd(m.ip, m.port)
+			}
+			m = pushStatus(m, fmt.Sprintf("Device not found on network: %v", msg.err))
+			return m, nil
+		}
+		m.ip = msg.device.IP
+		m.activeMac = msg.device.Mac
+		for i := range m.savedDevices {
+			if strings.ToLower(strings.TrimSpace(m.savedDevices[i].Mac)) == m.activeMac {
+				m.savedDevices[i].IP = m.ip
+			}
+		}
+		m.persistConfig()
+		m.syncingState = true
+		return m, tea.Batch(syncDeviceStateCmd(m.ip, m.port), m.spinner.Tick)
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
@@ -123,7 +147,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.state = menuView
 					m.textInput.Blur()
 					m.textInput.SetValue("")
-					m.status = "Config saved"
+					m = pushStatus(m, "Config saved")
 				}
 			case "esc":
 				return m, tea.Quit
@@ -140,54 +164,79 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "q":
 				return m, tea.Quit
 			case "up", "k":
+				m.lastKeyWasG = false
 				if m.cursor > 0 {
 					m.cursor--
 				}
 			case "down", "j":
+				m.lastKeyWasG = false
 				if m.cursor < len(m.choices)-1 {
 					m.cursor++
 				}
+			case "g":
+				if m.lastKeyWasG {
+					m.cursor = 0
+					m.lastKeyWasG = false
+				} else {
+					m.lastKeyWasG = true
+				}
+			case "G":
+				m.lastKeyWasG = false
+				m.cursor = len(m.choices) - 1
+			case "1", "2", "3", "4", "5", "6", "7", "8", "9", "0":
+				m.lastKeyWasG = false
+				idx, _ := strconv.Atoi(msg.String())
+				if idx == 0 {
+					idx = 10
+				}
+				idx-- // 1-indexed to 0-indexed
+				if idx < len(m.choices) {
+					m.cursor = idx
+				}
 			case "enter", " ":
+				m.lastKeyWasG = false
 				switch m.cursor {
-				case 0:
+				case 0: // Toggle Power
 					m.isOn = !m.isOn
 					start := time.Now()
 					err := wiz.SendCommand(m.ip, m.port, "setState", map[string]interface{}{"state": m.isOn})
 					m.recordCommand(time.Since(start), err)
 					if err != nil {
-						m.status = fmt.Sprintf("Power toggle failed: %v", err)
+						m = pushStatus(m, fmt.Sprintf("Power toggle failed: %v", err))
 						m.isOn = !m.isOn
 					} else if m.isOn {
-						m.status = "Power: ON"
+						m = pushStatus(m, "Power: ON")
 					} else {
-						m.status = "Power: OFF"
+						m = pushStatus(m, "Power: OFF")
 					}
-				case 1:
+				case 1: // Color Grid
 					m.state = colorPickerView
-				case 2:
+				case 2: // Hex Colors
 					m.state = hexInputView
 					m.textInput.CharLimit = 7
 					m.textInput.Placeholder = "#CBA6F7"
 					m.textInput.SetValue("")
 					m.textInput.Focus()
-				case 3:
+				case 3: // Brightness
 					m.state = brightnessView
-				case 4:
+				case 4: // Color Temp
+					m.state = colorTempView
+				case 5: // Sleep Timer
 					m.state = timerInputView
 					m.textInput.CharLimit = 5
 					m.textInput.Placeholder = "Mins (e.g. 15)"
 					m.textInput.SetValue("")
 					m.textInput.Focus()
-				case 5:
+				case 6: // Discover Devices
 					m.state = discoveryView
 					m.discovering = true
-					m.status = "Scanning local network..."
+					m = pushStatus(m, "Scanning local network...")
 					cmds = append(cmds, discoverDevicesCmd(), m.spinner.Tick)
-				case 6:
+				case 7: // Saved Devices
 					m.state = savedDevicesView
-				case 7:
+				case 8: // Help
 					m.state = helpView
-				case 8:
+				case 9: // Exit
 					return m, tea.Quit
 				}
 			}
@@ -198,18 +247,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "up", "k":
 				if m.colorCursor >= 3 {
 					m.colorCursor -= 3
+					r, g, b, _ := wiz.HexToRGB(colorPalette[m.colorCursor].hex)
+					_ = wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness})
 				}
 			case "down", "j":
 				if m.colorCursor < len(colorPalette)-3 {
 					m.colorCursor += 3
+					r, g, b, _ := wiz.HexToRGB(colorPalette[m.colorCursor].hex)
+					_ = wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness})
 				}
 			case "left", "h":
 				if m.colorCursor > 0 {
 					m.colorCursor--
+					r, g, b, _ := wiz.HexToRGB(colorPalette[m.colorCursor].hex)
+					_ = wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness})
 				}
 			case "right", "l":
 				if m.colorCursor < len(colorPalette)-1 {
 					m.colorCursor++
+					r, g, b, _ := wiz.HexToRGB(colorPalette[m.colorCursor].hex)
+					_ = wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness})
 				}
 			case "enter":
 				selectedHex := colorPalette[m.colorCursor].hex
@@ -218,11 +275,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				err := wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness})
 				m.recordCommand(time.Since(start), err)
 				if err != nil {
-					m.status = fmt.Sprintf("Color change failed: %v", err)
+					m = pushStatus(m, fmt.Sprintf("Color change failed: %v", err))
 				} else {
 					m.currentColor = selectedHex
 					m.isOn = true
-					m.status = "Color: " + colorPalette[m.colorCursor].name
+					m = pushStatus(m, "Color: "+colorPalette[m.colorCursor].name)
+					m.persistConfig()
 				}
 				m.state = menuView
 			}
@@ -234,17 +292,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				val := m.textInput.Value()
 				r, g, b, err := wiz.HexToRGB(val)
 				if err != nil {
-					m.status = "Err: Invalid Hex"
+					m = pushStatus(m, "Err: Invalid Hex")
 				} else {
 					start := time.Now()
 					cmdErr := wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness})
 					m.recordCommand(time.Since(start), cmdErr)
 					if cmdErr != nil {
-						m.status = fmt.Sprintf("Color change failed: %v", cmdErr)
+						m = pushStatus(m, fmt.Sprintf("Color change failed: %v", cmdErr))
 					} else {
 						m.currentColor = val
 						m.isOn = true
-						m.status = fmt.Sprintf("Color: %s", val)
+						m = pushStatus(m, fmt.Sprintf("Color: %s", val))
+						m.persistConfig()
 					}
 				}
 				m.state = menuView
@@ -253,36 +312,69 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		case brightnessView:
+			sendBrightness := func(newVal int) {
+				start := time.Now()
+				err := wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"dimming": newVal})
+				m.recordCommand(time.Since(start), err)
+				if err != nil {
+					m = pushStatus(m, fmt.Sprintf("Brightness change failed: %v", err))
+				} else {
+					m.brightness = newVal
+					m = pushStatus(m, fmt.Sprintf("Bright: %d%%", m.brightness))
+					m.brightnessHistory = appendBounded(m.brightnessHistory, m.brightness, 30)
+					m.persistConfig()
+				}
+			}
 			switch msg.String() {
 			case "esc", "q", "enter":
 				m.state = menuView
 			case "left", "h":
 				if m.brightness > 10 {
-					m.brightness -= 10
-					start := time.Now()
-					err := wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"dimming": m.brightness})
-					m.recordCommand(time.Since(start), err)
-					if err != nil {
-						m.status = fmt.Sprintf("Brightness change failed: %v", err)
-						m.brightness += 10
-					} else {
-						m.status = fmt.Sprintf("Bright: %d%%", m.brightness)
-						m.brightnessHistory = appendBounded(m.brightnessHistory, m.brightness, 30)
-					}
+					sendBrightness(m.brightness - 10)
 				}
 			case "right", "l":
 				if m.brightness < 100 {
-					m.brightness += 10
-					start := time.Now()
-					err := wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"dimming": m.brightness})
-					m.recordCommand(time.Since(start), err)
-					if err != nil {
-						m.status = fmt.Sprintf("Brightness change failed: %v", err)
-						m.brightness -= 10
-					} else {
-						m.status = fmt.Sprintf("Bright: %d%%", m.brightness)
-						m.brightnessHistory = appendBounded(m.brightnessHistory, m.brightness, 30)
-					}
+					sendBrightness(m.brightness + 10)
+				}
+			case "-", "_":
+				if m.brightness > 1 {
+					sendBrightness(m.brightness - 1)
+				}
+			case "+", "=":
+				if m.brightness < 100 {
+					sendBrightness(m.brightness + 1)
+				}
+			}
+		case colorTempView:
+			sendColorTemp := func(k int) {
+				start := time.Now()
+				err := wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"temp": k, "dimming": m.brightness})
+				m.recordCommand(time.Since(start), err)
+				if err != nil {
+					m = pushStatus(m, fmt.Sprintf("Color temp failed: %v", err))
+				} else {
+					m.colorTemp = k
+					m = pushStatus(m, fmt.Sprintf("Temp: %dK", k))
+				}
+			}
+			switch msg.String() {
+			case "esc", "q", "enter":
+				m.state = menuView
+			case "left", "h":
+				if m.colorTemp > 2200 {
+					sendColorTemp(m.colorTemp - 100)
+				}
+			case "right", "l":
+				if m.colorTemp < 6500 {
+					sendColorTemp(m.colorTemp + 100)
+				}
+			case "-":
+				if m.colorTemp > 2200 {
+					sendColorTemp(m.colorTemp - 10)
+				}
+			case "+", "=":
+				if m.colorTemp < 6500 {
+					sendColorTemp(m.colorTemp + 10)
 				}
 			}
 		case timerInputView:
@@ -295,16 +387,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err == nil && mins > 0 {
 					m.timerActive = true
 					m.detachedTimer = false
-					m.status = fmt.Sprintf("Sleep in %dm", mins)
+					m = pushStatus(m, fmt.Sprintf("Sleep in %dm", mins))
 					cmds = append(cmds, startTimer(time.Duration(mins)*time.Minute), m.spinner.Tick)
 					if spawnErr := startDetachedTimer(mins, m.ip, m.port); spawnErr == nil {
 						m.detachedTimer = true
-						m.status = fmt.Sprintf("Sleep in %dm (background armed)", mins)
+						m = pushStatus(m, fmt.Sprintf("Sleep in %dm (background armed)", mins))
 					} else {
-						m.status = fmt.Sprintf("Sleep in %dm (local only): %v", mins, spawnErr)
+						m = pushStatus(m, fmt.Sprintf("Sleep in %dm (local only): %v", mins, spawnErr))
 					}
 				} else {
-					m.status = "Invalid timer value"
+					m = pushStatus(m, "Invalid timer value")
 				}
 				m.state = menuView
 			default:
@@ -318,7 +410,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "r":
 				if !m.discovering {
 					m.discovering = true
-					m.status = "Rescanning local network..."
+					m = pushStatus(m, "Rescanning local network...")
 					cmds = append(cmds, discoverDevicesCmd(), m.spinner.Tick)
 				}
 			case "up", "k":
@@ -333,8 +425,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.discoveredDevices) > 0 {
 					selectedDevice := m.discoveredDevices[m.deviceCursor]
 					m.ip = selectedDevice.IP
+					m.activeMac = strings.ToLower(strings.TrimSpace(selectedDevice.Mac))
 					m.persistConfig()
-					m.status = fmt.Sprintf("Selected: %s (%s)", selectedDevice.Name, selectedDevice.IP)
+					m = pushStatus(m, fmt.Sprintf("Selected: %s (%s)", selectedDevice.Name, selectedDevice.IP))
 					m.state = menuView
 					m.syncingState = true
 					cmds = append(cmds, syncDeviceStateCmd(m.ip, m.port), m.spinner.Tick)
@@ -364,40 +457,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				if len(m.savedDevices) > 0 {
 					selected := m.savedDevices[m.savedDeviceCursor]
-					if strings.TrimSpace(selected.Mac) != "" {
-						resolvedIP := ""
-						discovered, err := wiz.DiscoverDevices()
-						if err == nil {
-							selectedMAC := strings.ToLower(strings.TrimSpace(selected.Mac))
-							for _, device := range discovered {
-								if strings.ToLower(strings.TrimSpace(device.Mac)) == selectedMAC {
-									resolvedIP = device.IP
-									break
-								}
-							}
-						}
-						if resolvedIP != "" {
-							m.savedDevices[m.savedDeviceCursor].IP = resolvedIP
-							selected.IP = resolvedIP
-						}
-					}
-
 					m.ip = selected.IP
 					if selected.Port != "" {
 						m.port = selected.Port
 					}
+					m.activeMac = strings.ToLower(strings.TrimSpace(selected.Mac))
 					m.persistConfig()
-					m.status = fmt.Sprintf("Selected saved device: %s", selected.Name)
+					m = pushStatus(m, fmt.Sprintf("Selected saved device: %s", selected.Name))
 					m.state = menuView
-					m.syncingState = true
-					cmds = append(cmds, syncDeviceStateCmd(m.ip, m.port), m.spinner.Tick)
+					if m.activeMac != "" {
+						// Fast MAC-based resolution in background
+						m.syncingState = true
+						cmds = append(cmds, resolveDeviceCmd(m.activeMac, m.port), m.spinner.Tick)
+					} else {
+						m.syncingState = true
+						cmds = append(cmds, syncDeviceStateCmd(m.ip, m.port), m.spinner.Tick)
+					}
 				}
 			case "d":
 				if len(m.savedDevices) > 0 {
 					name := m.savedDevices[m.savedDeviceCursor].Name
 					m.deleteSavedDevice()
 					m.persistConfig()
-					m.status = fmt.Sprintf("Removed saved device: %s", name)
+					m = pushStatus(m, fmt.Sprintf("Removed saved device: %s", name))
 				}
 			}
 		case saveDeviceNameView:
@@ -407,7 +489,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = discoveryView
 			case "enter":
 				if strings.TrimSpace(m.pendingSaveDevice.Mac) == "" {
-					m.status = "Cannot save device without MAC"
+					m = pushStatus(m, "Cannot save device without MAC")
 					m.state = discoveryView
 					m.textInput.Blur()
 					break
@@ -432,7 +514,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ip = saved.IP
 				m.persistConfig()
 				m.textInput.Blur()
-				m.status = fmt.Sprintf("Saved device: %s", saved.Name)
+				m = pushStatus(m, fmt.Sprintf("Saved device: %s", saved.Name))
 				m.state = discoveryView
 			default:
 				m.textInput, cmd = m.textInput.Update(msg)

@@ -11,9 +11,12 @@ import (
 
 // Config stores target bulb network settings.
 type Config struct {
-	IP           string        `json:"ip"`
-	Port         string        `json:"port"`
-	SavedDevices []SavedDevice `json:"savedDevices,omitempty"`
+	Version        int           `json:"version"`
+	IP             string        `json:"ip"`
+	Port           string        `json:"port"`
+	SavedDevices   []SavedDevice `json:"savedDevices,omitempty"`
+	LastColor      string        `json:"lastColor,omitempty"`
+	LastBrightness int           `json:"lastBrightness,omitempty"`
 }
 
 // SavedDevice stores a user-named bulb target for quick reuse.
