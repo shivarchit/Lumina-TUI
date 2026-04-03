@@ -193,6 +193,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if idx < len(m.choices) {
 					m.cursor = idx
 				}
+			case "h", "[":
+				m.adjustBrightness(-10)
+			case "l", "]":
+				m.adjustBrightness(10)
+			case "-", "_":
+				m.adjustBrightness(-1)
+			case "+", "=":
+				m.adjustBrightness(1)
 			case "enter", " ":
 				m.lastKeyWasG = false
 				switch m.cursor {
@@ -312,38 +320,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		case brightnessView:
-			sendBrightness := func(newVal int) {
-				start := time.Now()
-				err := wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"dimming": newVal})
-				m.recordCommand(time.Since(start), err)
-				if err != nil {
-					m = pushStatus(m, fmt.Sprintf("Brightness change failed: %v", err))
-				} else {
-					m.brightness = newVal
-					m = pushStatus(m, fmt.Sprintf("Bright: %d%%", m.brightness))
-					m.brightnessHistory = appendBounded(m.brightnessHistory, m.brightness, 30)
-					m.persistConfig()
-				}
-			}
 			switch msg.String() {
 			case "esc", "q", "enter":
 				m.state = menuView
-			case "left", "h":
-				if m.brightness > 10 {
-					sendBrightness(m.brightness - 10)
-				}
-			case "right", "l":
-				if m.brightness < 100 {
-					sendBrightness(m.brightness + 10)
-				}
+			case "left", "h", "[":
+				m.adjustBrightness(-10)
+			case "right", "l", "]":
+				m.adjustBrightness(10)
 			case "-", "_":
-				if m.brightness > 1 {
-					sendBrightness(m.brightness - 1)
-				}
+				m.adjustBrightness(-1)
 			case "+", "=":
-				if m.brightness < 100 {
-					sendBrightness(m.brightness + 1)
-				}
+				m.adjustBrightness(1)
 			}
 		case colorTempView:
 			sendColorTemp := func(k int) {

@@ -196,6 +196,30 @@ func (m *model) persistConfig() {
 	})
 }
 
+// adjustBrightness modifies the current light brightness by delta, clamping to 1-100%.
+func (m *model) adjustBrightness(delta int) {
+	newVal := m.brightness + delta
+	if newVal > 100 {
+		newVal = 100
+	}
+	if newVal < 1 {
+		newVal = 1
+	}
+
+	start := time.Now()
+	err := wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"dimming": newVal})
+	m.recordCommand(time.Since(start), err)
+	if err != nil {
+		*m = pushStatus(*m, fmt.Sprintf("Brightness change failed: %v", err))
+	} else {
+		m.brightness = newVal
+		m.isOn = true
+		*m = pushStatus(*m, fmt.Sprintf("Bright: %d%%", m.brightness))
+		m.brightnessHistory = appendBounded(m.brightnessHistory, m.brightness, 30)
+		m.persistConfig()
+	}
+}
+
 // pushStatus updates the current status and appends it to the bounded history log.
 func pushStatus(m model, s string) model {
 	m.status = s

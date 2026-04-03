@@ -111,7 +111,7 @@ func (m model) View() string {
 		leftPanel += lipgloss.NewStyle().Foreground(mauve).Render(bar(m.brightness, 100, 28)) + "\n"
 		leftPanel += lipgloss.NewStyle().Foreground(blue).Render(sparkline(m.brightnessHistory, 28)) + "\n"
 		leftPanel += fmt.Sprintf("Level  %d%%\n\n", m.brightness)
-		leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("Left/Right to adjust · Enter/Esc to return")
+		leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("h/l/[] to adjust (10%) · -/+ to adjust (1%) · Enter/Esc to return")
 	case timerInputView:
 		leftPanel = sectionHeader("Sleep Timer", "Minutes") + "\n\n"
 		leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("Set minutes until automatic power off") + "\n\n"
@@ -129,6 +129,9 @@ func (m model) View() string {
 			"r        Refresh discovery\n" +
 			"s        Save discovered device\n" +
 			"d        Delete saved device\n\n" +
+			lipgloss.NewStyle().Foreground(textCol).Render("Quick Control:\n") +
+			"h/l or [] Adjust Brightness (10%)\n" +
+			"- / +     Adjust Brightness (1%)\n\n" +
 			lipgloss.NewStyle().Foreground(textCol).Render("Discovery:\n") +
 			"Auto scan on open\n" +
 			"Dedupe by MAC/IP\n" +
