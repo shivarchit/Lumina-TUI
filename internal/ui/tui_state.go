@@ -198,6 +198,8 @@ type model struct {
 
 // NewModel creates the first TUI model from runtime config.
 func NewModel(cfg config.Config, needsSetup bool) model {
+	themeName := applyTheme(cfg.Theme)
+
 	ti := textinput.New()
 	ti.CharLimit = 15
 	ti.Width = 20
@@ -228,7 +230,6 @@ func NewModel(cfg config.Config, needsSetup bool) model {
 		initTemp = cfg.LastColorTemp
 	}
 
-	themeName := applyTheme(cfg.Theme)
 	themeCursor := 0
 	for i, name := range themeOrder {
 		if name == themeName {

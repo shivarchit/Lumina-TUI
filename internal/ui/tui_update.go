@@ -249,6 +249,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if target {
 						statusMsg = "Power: ON"
 					}
+					if m.activeGroup != "" {
+						// Group fan-out has no onSuccess hook, so flip optimistically
+						// at dispatch (same pattern as adjustBrightnessCmd).
+						m.isOn = target
+					}
 					cmds = append(cmds, m.sendToTarget("setState",
 						map[string]interface{}{"state": target},
 						statusMsg, "Power toggle failed",
@@ -651,13 +656,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.groupCursor++
 				}
 			case "n":
-				m.textInput.CharLimit = 32
-				m.textInput.Placeholder = "Group name"
-				m.textInput.SetValue("")
-				m.textInput.Focus()
-				m.state = groupNameView
+				if m.editingGroup < 0 {
+					m.textInput.CharLimit = 32
+					m.textInput.Placeholder = "Group name"
+					m.textInput.SetValue("")
+					m.textInput.Focus()
+					m.state = groupNameView
+				}
 			case "e":
-				if len(m.groups) > 0 {
+				if m.editingGroup < 0 && len(m.groups) > 0 {
 					m.editingGroup = m.groupCursor
 					m.memberCursor = 0
 				}

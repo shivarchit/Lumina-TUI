@@ -9,6 +9,8 @@ import (
 
 	"wiz-tui/internal/config"
 	"wiz-tui/internal/wiz"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func testModel() model {
@@ -153,6 +155,29 @@ func TestAdjustBrightnessCmdClamps(t *testing.T) {
 	_ = m.adjustBrightnessCmd(-10)
 	if m.brightness != 1 {
 		t.Fatalf("expected clamp to 1, got %d", m.brightness)
+	}
+}
+
+func TestGroupToggleFlipsOptimisticallyAtDispatch(t *testing.T) {
+	m := testModel()
+	m.savedDevices = []config.SavedDevice{
+		{Name: "Lamp", IP: "192.168.1.9", Port: "38899", Mac: "aa:bb:cc:dd:ee:ff"},
+	}
+	m.groups = []config.Group{
+		{Name: "Living Room", Macs: []string{"aa:bb:cc:dd:ee:ff"}},
+	}
+	m.activeGroup = "Living Room"
+	m.isOn = true
+	m.cursor = 0 // Toggle Power
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(model)
+
+	if um.isOn {
+		t.Fatal("group toggle must flip isOn optimistically at dispatch, not wait for fanoutResultMsg")
+	}
+	if cmd == nil {
+		t.Fatal("expected a fanout command to be dispatched")
 	}
 }
 
