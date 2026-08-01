@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +16,22 @@ import (
 	"wiz-tui/internal/wiz"
 )
 
+var cliVerbs = map[string]bool{"on": true, "off": true, "color": true, "temp": true, "scene": true, "status": true, "discover": true}
+
+var sceneIDs = map[string]int{
+	"ocean": 1, "romance": 2, "sunset": 3, "party": 4, "fireplace": 5, "cozy": 6,
+	"forest": 7, "pastel": 8, "wake-up": 9, "bedtime": 10, "daylight": 12, "focus": 15,
+}
+
+// ParseVerb splits a CLI invocation into a known verb and its arguments.
+// Unknown first args (flags, empty) mean "no verb": launch the TUI.
+func ParseVerb(args []string) (string, []string) {
+	if len(args) == 0 || !cliVerbs[args[0]] {
+		return "", args
+	}
+	return args[0], args[1:]
+}
+
 // Run executes CLI handling and starts the interactive Lumina TUI.
 func Run() {
 	for _, a := range os.Args[1:] {
@@ -22,6 +39,11 @@ func Run() {
 			fmt.Printf("Lumina-TUI %s\n", version.Version)
 			os.Exit(0)
 		}
+	}
+
+	if verb, rest := ParseVerb(os.Args[1:]); verb != "" {
+		runCLI(verb, rest)
+		return
 	}
 
 	var (
@@ -111,3 +133,112 @@ func loadRuntimeConfig() (config.Config, bool) {
 	return cfg, false
 }
 
+// runCLI executes a one-shot device command and exits.
+func runCLI(verb string, args []string) {
+	cfg, needsSetup := loadRuntimeConfig()
+	if cfg.Port == "" {
+		cfg.Port = "38899"
+	}
+	if needsSetup {
+		fmt.Fprintln(os.Stderr, "no configured device - run lumina once to set up, or set WIZ_IP")
+		os.Exit(1)
+	}
+
+	fail := func(err error) {
+		fmt.Fprintf(os.Stderr, "%s failed: %v\n", verb, err)
+		os.Exit(1)
+	}
+
+	switch verb {
+	case "on", "off":
+		state := verb == "on"
+		if err := wiz.SendCommand(cfg.IP, cfg.Port, "setState", map[string]interface{}{"state": state}); err != nil {
+			fail(err)
+		}
+		fmt.Printf("%s:%s → power %s\n", cfg.IP, cfg.Port, verb)
+	case "color":
+		if len(args) < 1 {
+			fail(fmt.Errorf("usage: lumina color <#RRGGBB>"))
+		}
+		r, g, b, err := wiz.HexToRGB(args[0])
+		if err != nil {
+			fail(fmt.Errorf("invalid hex %q", args[0]))
+		}
+		if err := wiz.SendCommand(cfg.IP, cfg.Port, "setPilot", map[string]interface{}{"r": r, "g": g, "b": b}); err != nil {
+			fail(err)
+		}
+		fmt.Printf("%s:%s → color %s\n", cfg.IP, cfg.Port, args[0])
+	case "temp":
+		if len(args) < 1 {
+			fail(fmt.Errorf("usage: lumina temp <2200-6500>"))
+		}
+		k, err := strconv.Atoi(args[0])
+		if err != nil || k < 2200 || k > 6500 {
+			fail(fmt.Errorf("kelvin must be 2200-6500, got %q", args[0]))
+		}
+		if err := wiz.SendCommand(cfg.IP, cfg.Port, "setPilot", map[string]interface{}{"temp": k}); err != nil {
+			fail(err)
+		}
+		fmt.Printf("%s:%s → temp %dK\n", cfg.IP, cfg.Port, k)
+	case "scene":
+		if len(args) < 1 {
+			fail(fmt.Errorf("usage: lumina scene <name|id>"))
+		}
+		id, ok := sceneIDs[strings.ToLower(args[0])]
+		if !ok {
+			if n, err := strconv.Atoi(args[0]); err == nil && n >= 1 && n <= 32 {
+				id = n
+			} else {
+				fail(fmt.Errorf("unknown scene %q", args[0]))
+			}
+		}
+		if err := wiz.SendCommand(cfg.IP, cfg.Port, "setPilot", map[string]interface{}{"sceneId": id}); err != nil {
+			fail(err)
+		}
+		fmt.Printf("%s:%s → scene %s\n", cfg.IP, cfg.Port, args[0])
+	case "status":
+		type target struct{ ip, port, name string }
+		targets := []target{}
+		for _, d := range cfg.SavedDevices {
+			if d.IP != "" {
+				port := d.Port
+				if port == "" {
+					port = cfg.Port
+				}
+				name := d.Name
+				if name == "" {
+					name = d.IP
+				}
+				targets = append(targets, target{d.IP, port, name})
+			}
+		}
+		if len(targets) == 0 {
+			targets = append(targets, target{cfg.IP, cfg.Port, cfg.IP})
+		}
+		for _, t := range targets {
+			st, err := wiz.GetPilotState(t.ip, t.port)
+			if err != nil {
+				fmt.Printf("%-16s unreachable: %v\n", t.name, err)
+				continue
+			}
+			power := "off"
+			if st.Power {
+				power = "on"
+			}
+			detail := st.ColorHex
+			if st.Temp > 0 && st.ColorHex == "" {
+				detail = fmt.Sprintf("%dK", st.Temp)
+			}
+			fmt.Printf("%-16s %s · %d%% · %s\n", t.name, power, st.Brightness, detail)
+		}
+	case "discover":
+		devices, err := wiz.DiscoverDevices()
+		if err != nil {
+			fail(err)
+		}
+		for _, d := range devices {
+			fmt.Printf("%-16s %s  %s\n", d.Name, d.IP, d.Mac)
+		}
+		fmt.Printf("%d device(s)\n", len(devices))
+	}
+}

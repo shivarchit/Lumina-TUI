@@ -112,6 +112,12 @@ func (m model) View() string {
 		leftPanel += lipgloss.NewStyle().Foreground(blue).Render(sparkline(m.brightnessHistory, 28)) + "\n"
 		leftPanel += fmt.Sprintf("Level  %d%%\n\n", m.brightness)
 		leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("h/l/[] to adjust (10%) · -/+ to adjust (1%) · Enter/Esc to return")
+	case colorTempView:
+		leftPanel = sectionHeader("Color Temp", "White mode, 2200-6500K") + "\n\n"
+		leftPanel += lipgloss.NewStyle().Foreground(mauve).Render(bar(m.colorTemp-2200, 6500-2200, 28)) + "\n"
+		leftPanel += fmt.Sprintf("Temp   %dK\n", m.colorTemp)
+		leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("warm 2200K ─ 6500K cool") + "\n\n"
+		leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("h/l to adjust (100K) · -/+ to adjust (10K) · Enter/Esc to return")
 	case timerInputView:
 		leftPanel = sectionHeader("Sleep Timer", "Minutes") + "\n\n"
 		leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("Set minutes until automatic power off") + "\n\n"
@@ -195,6 +201,92 @@ func (m model) View() string {
 		leftPanel = sectionHeader("Save Device", "Enter display name") + "\n\n"
 		leftPanel += m.textInput.View() + "\n\n"
 		leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("Enter to save · Esc to cancel")
+	case themesView:
+		leftPanel = sectionHeader("Theme", "Enter applies · persists") + "\n\n"
+		for i, name := range themeOrder {
+			t := themes[name]
+			row := "  " + name
+			style := lipgloss.NewStyle().Foreground(subtext)
+			if i == m.themeCursor {
+				row = "> " + name
+				style = lipgloss.NewStyle().Foreground(mauve).Bold(true)
+			}
+			swatches := ""
+			for _, c := range []string{t.mauve, t.blue, t.green, t.red, t.text} {
+				swatches += lipgloss.NewStyle().Foreground(lipgloss.Color(c)).Render("██")
+			}
+			active := ""
+			if name == m.themeName {
+				active = lipgloss.NewStyle().Foreground(green).Render("  active")
+			}
+			leftPanel += fmt.Sprintf("%-14s %s%s\n", style.Render(row), swatches, active)
+		}
+	case scenesView:
+		leftPanel = sectionHeader("Scenes", "WiZ built-ins · Enter applies · digits quick-apply") + "\n\n"
+		for i, s := range scenes {
+			label := fmt.Sprintf("%-10s", s.name)
+			style := lipgloss.NewStyle().Foreground(textCol)
+			prefix := "  "
+			if i == m.sceneCursor {
+				style = lipgloss.NewStyle().Foreground(mauve).Bold(true)
+				prefix = "> "
+			}
+			marker := " "
+			if s.id == m.lastScene {
+				marker = lipgloss.NewStyle().Foreground(green).Render("*")
+			}
+			leftPanel += style.Render(prefix+label) + marker + " "
+			if (i+1)%3 == 0 {
+				leftPanel += "\n"
+			}
+		}
+	case groupsView:
+		leftPanel = sectionHeader("Groups", "n new · e edit members · Enter targets · d delete") + "\n\n"
+		if len(m.groups) == 0 {
+			leftPanel += "No groups yet. Press 'n' to create one."
+		} else if m.editingGroup >= 0 {
+			g := m.groups[m.editingGroup]
+			inGroup := map[string]bool{}
+			for _, mac := range g.Macs {
+				inGroup[strings.ToLower(strings.TrimSpace(mac))] = true
+			}
+			leftPanel += lipgloss.NewStyle().Foreground(mauve).Bold(true).Render(g.Name) + "  (Space toggles · Enter done)\n\n"
+			if len(m.savedDevices) == 0 {
+				leftPanel += "No saved devices to add."
+			}
+			for i, d := range m.savedDevices {
+				mark := "[ ]"
+				if inGroup[strings.ToLower(strings.TrimSpace(d.Mac))] {
+					mark = "[x]"
+				}
+				style := lipgloss.NewStyle().Foreground(textCol)
+				prefix := "  "
+				if i == m.memberCursor {
+					style = lipgloss.NewStyle().Foreground(mauve).Bold(true)
+					prefix = "> "
+				}
+				leftPanel += style.Render(fmt.Sprintf("%s%s %s", prefix, mark, d.Name)) + lipgloss.NewStyle().Foreground(subtext).Render("  "+d.IP) + "\n"
+			}
+		} else {
+			for i, g := range m.groups {
+				style := lipgloss.NewStyle().Foreground(textCol)
+				prefix := "  "
+				if i == m.groupCursor {
+					style = lipgloss.NewStyle().Foreground(mauve).Bold(true)
+					prefix = "> "
+				}
+				active := ""
+				if g.Name == m.activeGroup {
+					active = lipgloss.NewStyle().Foreground(green).Render("  targeted")
+				}
+				leftPanel += style.Render(fmt.Sprintf("%s%-16s", prefix, g.Name)) +
+					lipgloss.NewStyle().Foreground(subtext).Render(fmt.Sprintf("%d member(s)", len(g.Macs))) + active + "\n"
+			}
+		}
+	case groupNameView:
+		leftPanel = sectionHeader("New Group", "Enter display name") + "\n\n"
+		leftPanel += m.textInput.View() + "\n\n"
+		leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("Enter to create · Esc to cancel")
 	}
 
 	rightPanel := m.renderDashboard()

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -31,6 +32,10 @@ const (
 	savedDevicesView
 	saveDeviceNameView
 	helpView
+	themesView
+	scenesView
+	groupsView
+	groupNameView
 )
 
 type timerFinishedMsg struct{}
@@ -45,6 +50,14 @@ type stateSyncResultMsg struct {
 	state   wiz.PilotState
 	err     error
 	elapsed time.Duration
+	quiet   bool
+}
+
+type pollTickMsg struct{}
+
+// pollCmd schedules the next idle-state heartbeat.
+func pollCmd() tea.Cmd {
+	return tea.Tick(10*time.Second, func(time.Time) tea.Msg { return pollTickMsg{} })
 }
 
 type macResolutionResultMsg struct {
@@ -60,16 +73,47 @@ type commandResultMsg struct {
 	failPrefix string
 }
 
+type theme struct {
+	mauve, blue, green, red, text, subtext, surface, base string
+}
+
+var themes = map[string]theme{
+	"mocha":     {"#CBA6F7", "#89B4FA", "#A6E3A1", "#F38BA8", "#CDD6F4", "#6C7086", "#313244", "#1E1E2E"},
+	"macchiato": {"#C6A0F6", "#8AADF4", "#A6DA95", "#ED8796", "#CAD3F5", "#6E738D", "#363A4F", "#24273A"},
+	"frappe":    {"#CA9EE6", "#8CAAEE", "#A6D189", "#E78284", "#C6D0F5", "#737994", "#414559", "#303446"},
+	"latte":     {"#8839EF", "#1E66F5", "#40A02B", "#D20F39", "#4C4F69", "#9CA0B0", "#CCD0DA", "#EFF1F5"},
+	"dracula":   {"#BD93F9", "#8BE9FD", "#50FA7B", "#FF5555", "#F8F8F2", "#6272A4", "#44475A", "#282A36"},
+	"gruvbox":   {"#D3869B", "#83A598", "#B8BB26", "#FB4934", "#EBDBB2", "#928374", "#3C3836", "#282828"},
+}
+
+// themeOrder fixes menu ordering (maps are unordered).
+var themeOrder = []string{"mocha", "macchiato", "frappe", "latte", "dracula", "gruvbox"}
+
 var (
-	mauve   = lipgloss.Color("#CBA6F7")
-	blue    = lipgloss.Color("#89B4FA")
-	green   = lipgloss.Color("#A6E3A1")
-	red     = lipgloss.Color("#F38BA8")
-	textCol = lipgloss.Color("#CDD6F4")
-	subtext = lipgloss.Color("#6C7086")
-	surface = lipgloss.Color("#313244")
-	base    = lipgloss.Color("#1E1E2E")
+	mauve   lipgloss.Color
+	blue    lipgloss.Color
+	green   lipgloss.Color
+	red     lipgloss.Color
+	textCol lipgloss.Color
+	subtext lipgloss.Color
+	surface lipgloss.Color
+	base    lipgloss.Color
 )
+
+// applyTheme reassigns the package color vars; unknown names fall back to mocha.
+// ponytail: package-global palette, fine for a single-model TUI process.
+func applyTheme(name string) string {
+	t, ok := themes[name]
+	if !ok {
+		name = "mocha"
+		t = themes[name]
+	}
+	mauve, blue, green, red = lipgloss.Color(t.mauve), lipgloss.Color(t.blue), lipgloss.Color(t.green), lipgloss.Color(t.red)
+	textCol, subtext, surface, base = lipgloss.Color(t.text), lipgloss.Color(t.subtext), lipgloss.Color(t.surface), lipgloss.Color(t.base)
+	return name
+}
+
+func init() { applyTheme("mocha") }
 
 var colorPalette = []struct{ name, hex string }{
 	{"Warm", "#FFB56B"}, {"Day", "#FFE4CE"}, {"Cool", "#E0F7FA"},
@@ -81,6 +125,21 @@ var colorPalette = []struct{ name, hex string }{
 	{"Lvndr", "#E6E6FA"}, {"Prple", "#800080"}, {"Mgnta", "#FF00FF"},
 }
 
+// scenes are WiZ firmware built-ins addressed by sceneId.
+var scenes = []struct {
+	name string
+	id   int
+}{
+	{"Ocean", 1}, {"Romance", 2}, {"Sunset", 3},
+	{"Party", 4}, {"Fireplace", 5}, {"Cozy", 6},
+	{"Forest", 7}, {"Pastel", 8}, {"Wake-up", 9},
+	{"Bedtime", 10}, {"Daylight", 12}, {"Focus", 15},
+}
+
+func sceneParams(id int) map[string]interface{} {
+	return map[string]interface{}{"sceneId": id}
+}
+
 type model struct {
 	state         sessionState
 	setupStep     int
@@ -88,6 +147,7 @@ type model struct {
 	icons         []string
 	cursor        int
 	colorCursor   int
+	sceneCursor   int
 	status        string
 	ip, port      string
 	isOn          bool
@@ -121,10 +181,25 @@ type model struct {
 	colorTemp          int
 	windowWidth        int
 	windowHeight       int
+	themeName          string
+	themeCursor        int
+	lastScene          int
+
+	groups       []config.Group
+	groupCursor  int
+	memberCursor int
+	editingGroup int
+	activeGroup  string
+
+	lastSyncAt time.Time
+	lastSyncOK bool
+	whiteMode  bool
 }
 
 // NewModel creates the first TUI model from runtime config.
 func NewModel(cfg config.Config, needsSetup bool) model {
+	themeName := applyTheme(cfg.Theme)
+
 	ti := textinput.New()
 	ti.CharLimit = 15
 	ti.Width = 20
@@ -155,11 +230,21 @@ func NewModel(cfg config.Config, needsSetup bool) model {
 		initTemp = cfg.LastColorTemp
 	}
 
+	themeCursor := 0
+	for i, name := range themeOrder {
+		if name == themeName {
+			themeCursor = i
+			break
+		}
+	}
+
 	return model{
 		state:              state,
 		setupStep:          0,
-		choices:            []string{"Toggle Power", "Color Grid", "Hex Colors", "Brightness", "Color Temp", "Sleep Timer", "Discover Devices", "Saved Devices", "Help", "Exit"},
-		icons:              []string{"PWR", "CLR", "HEX", "BRT", "CCT", "TMR", "DSC", "SAV", "HLP", "EXT"},
+		choices:            []string{"Toggle Power", "Scenes", "Groups", "Color Grid", "Hex Colors", "Brightness", "Color Temp", "Sleep Timer", "Discover Devices", "Saved Devices", "Theme", "Help", "Exit"},
+		icons:              []string{"PWR", "SCN", "GRP", "CLR", "HEX", "BRT", "CCT", "TMR", "DSC", "SAV", "THM", "HLP", "EXT"},
+		themeName:          themeName,
+		themeCursor:        themeCursor,
 		status:             "Ready.",
 		statusLog:          []string{"Ready."},
 		ip:                 cfg.IP,
@@ -180,6 +265,9 @@ func NewModel(cfg config.Config, needsSetup bool) model {
 		discoveryLatencyMs: []int{},
 		windowWidth:        120,
 		windowHeight:       36,
+		lastScene:          cfg.LastScene,
+		groups:             cfg.Groups,
+		editingGroup:       -1,
 	}
 }
 
@@ -203,6 +291,9 @@ func (m *model) persistConfig() {
 		LastColor:      m.currentColor,
 		LastBrightness: m.brightness,
 		LastColorTemp:  m.colorTemp,
+		Theme:          m.themeName,
+		LastScene:      m.lastScene,
+		Groups:         m.groups,
 	})
 }
 
@@ -219,7 +310,7 @@ func (m *model) adjustBrightnessCmd(delta int) tea.Cmd {
 	m.brightness = newVal
 	m.brightnessHistory = appendBounded(m.brightnessHistory, newVal, 30)
 
-	return sendCmd(m.ip, m.port, "setPilot", map[string]interface{}{"dimming": newVal},
+	return m.sendToTarget("setPilot", map[string]interface{}{"dimming": newVal},
 		fmt.Sprintf("Bright: %d%%", newVal), "Brightness change failed",
 		func(mm *model) {
 			mm.isOn = true
@@ -348,11 +439,11 @@ func discoverDevicesCmd() tea.Cmd {
 }
 
 // syncDeviceStateCmd fetches current target state asynchronously.
-func syncDeviceStateCmd(ip, port string) tea.Cmd {
+func syncDeviceStateCmd(ip, port string, quiet bool) tea.Cmd {
 	return func() tea.Msg {
 		start := time.Now()
 		state, err := wiz.GetPilotState(ip, port)
-		return stateSyncResultMsg{state: state, err: err, elapsed: time.Since(start)}
+		return stateSyncResultMsg{state: state, err: err, elapsed: time.Since(start), quiet: quiet}
 	}
 }
 
@@ -380,6 +471,87 @@ func sendCmd(ip, port, method string, params map[string]interface{},
 			failPrefix: failPrefix,
 		}
 	}
+}
+
+type fanoutResultMsg struct {
+	label   string
+	ok      int
+	failed  []string
+	elapsed time.Duration
+}
+
+// fanoutCmd sends one command to every target concurrently and aggregates.
+func fanoutCmd(targets [][2]string, names []string, method string, params map[string]interface{}, label string) tea.Cmd {
+	return func() tea.Msg {
+		start := time.Now()
+		type result struct {
+			idx int
+			err error
+		}
+		results := make(chan result, len(targets))
+		for i, t := range targets {
+			go func(i int, ip, port string) {
+				results <- result{i, wiz.SendCommand(ip, port, method, params)}
+			}(i, t[0], t[1])
+		}
+		res := fanoutResultMsg{label: label}
+		for range targets {
+			r := <-results
+			if r.err != nil {
+				res.failed = append(res.failed, names[r.idx])
+			} else {
+				res.ok++
+			}
+		}
+		sort.Strings(res.failed)
+		res.elapsed = time.Since(start)
+		return res
+	}
+}
+
+// groupTargets resolves the active group's MACs to (ip,port) pairs via saved devices.
+func (m *model) groupTargets() ([][2]string, []string) {
+	var g *config.Group
+	for i := range m.groups {
+		if m.groups[i].Name == m.activeGroup {
+			g = &m.groups[i]
+			break
+		}
+	}
+	if g == nil {
+		return nil, nil
+	}
+	byMac := map[string]config.SavedDevice{}
+	for _, d := range m.savedDevices {
+		byMac[strings.ToLower(strings.TrimSpace(d.Mac))] = d
+	}
+	var targets [][2]string
+	var names []string
+	for _, mac := range g.Macs {
+		d, ok := byMac[strings.ToLower(strings.TrimSpace(mac))]
+		if !ok || d.IP == "" {
+			continue // member no longer saved; skipped silently
+		}
+		port := d.Port
+		if port == "" {
+			port = m.port
+		}
+		targets = append(targets, [2]string{d.IP, port})
+		names = append(names, d.Name)
+	}
+	return targets, names
+}
+
+// sendToTarget routes a device command to the active group (fan-out) or the single target.
+func (m *model) sendToTarget(method string, params map[string]interface{}, successMsg, failPrefix string, onSuccess func(*model)) tea.Cmd {
+	if m.activeGroup == "" {
+		return sendCmd(m.ip, m.port, method, params, successMsg, failPrefix, onSuccess)
+	}
+	targets, names := m.groupTargets()
+	if len(targets) == 0 {
+		return sendCmd(m.ip, m.port, method, params, successMsg, failPrefix, onSuccess)
+	}
+	return fanoutCmd(targets, names, method, params, m.activeGroup+" → "+successMsg)
 }
 
 // startDetachedTimer launches a detached worker process for timer actions.
@@ -561,11 +733,35 @@ func (m model) renderDashboard() string {
 		Padding(0, 2).
 		Render("  ")
 
+	modeLine := fmt.Sprintf("Mode     %s %s",
+		lipgloss.NewStyle().Background(mauve).Foreground(base).Bold(true).Padding(0, 1).Render("COLOR"),
+		colorSwatch+" "+lipgloss.NewStyle().Foreground(mauve).Render(m.currentColor))
+	if m.whiteMode {
+		modeLine = fmt.Sprintf("Mode     %s %dK",
+			lipgloss.NewStyle().Background(green).Foreground(base).Bold(true).Padding(0, 1).Render("WHITE"),
+			m.colorTemp)
+	}
+	syncLine := "Sync     -"
+	if !m.lastSyncAt.IsZero() {
+		age := int(time.Since(m.lastSyncAt).Seconds())
+		if m.lastSyncOK && age <= 30 {
+			syncLine = lipgloss.NewStyle().Foreground(green).Render(fmt.Sprintf("Sync     live · %ds ago", age))
+		} else {
+			syncLine = lipgloss.NewStyle().Foreground(red).Render(fmt.Sprintf("Sync     stale · %ds ago", age))
+		}
+	}
+
+	targetLine := fmt.Sprintf("Target   %s:%s", m.ip, m.port)
+	if m.activeGroup != "" {
+		targetLine = fmt.Sprintf("Target   group: %s", m.activeGroup)
+	}
+
 	core := metricBlock("Core", []string{
 		fmt.Sprintf("Power    %s", powerStyle.Bold(true).Render(powerState)),
-		fmt.Sprintf("Target   %s:%s", m.ip, m.port),
+		targetLine,
 		aliasLine,
-		fmt.Sprintf("Color    %s %s", colorSwatch, lipgloss.NewStyle().Foreground(mauve).Render(m.currentColor)),
+		modeLine,
+		syncLine,
 	}, blue, 34)
 
 	brightnessBlock := metricBlock("Brightness", []string{

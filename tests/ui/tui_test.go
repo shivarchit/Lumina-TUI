@@ -47,7 +47,7 @@ func TestInvalidHexShowsErrorStatus(t *testing.T) {
 		mod, _ = mod.Update(msg)
 	}
 
-	press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")}) // jump cursor to Hex Colors
+	press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("5")}) // jump cursor to Hex Colors
 	press(tea.KeyMsg{Type: tea.KeyEnter})                     // open hex input
 	press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")}) // type invalid value
 	press(tea.KeyMsg{Type: tea.KeyEnter})                     // submit
@@ -55,5 +55,20 @@ func TestInvalidHexShowsErrorStatus(t *testing.T) {
 	view := mod.View()
 	if !strings.Contains(view, "Error") {
 		t.Fatalf("expected Error badge after invalid hex, view: %q", view)
+	}
+}
+
+func TestColorTempViewRendersPanel(t *testing.T) {
+	var mod tea.Model = ui.NewModel(config.Config{IP: "192.168.1.5", Port: "38899"}, false)
+	press := func(msg tea.Msg) {
+		mod, _ = mod.Update(msg)
+	}
+
+	press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("7")}) // jump to Color Temp
+	press(tea.KeyMsg{Type: tea.KeyEnter})                     // open it
+
+	view := mod.View()
+	if !strings.Contains(view, "Color Temp") {
+		t.Fatalf("color temp view must render a titled panel, got blank left panel: %q", view[:200])
 	}
 }

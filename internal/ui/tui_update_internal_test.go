@@ -2,10 +2,15 @@ package ui
 
 import (
 	"errors"
+	"net"
+	"strconv"
 	"testing"
 	"time"
 
 	"wiz-tui/internal/config"
+	"wiz-tui/internal/wiz"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func testModel() model {
@@ -108,6 +113,36 @@ func TestAdjustBrightnessCmdStepsImmediately(t *testing.T) {
 	}
 }
 
+func TestQuietSyncSkipsStatusAndSetsMode(t *testing.T) {
+	m := testModel()
+	before := m.status
+	msg := stateSyncResultMsg{
+		state: wiz.PilotState{Power: true, Brightness: 50, Temp: 4000},
+		quiet: true, elapsed: 5 * time.Millisecond,
+	}
+	updated, _ := m.Update(msg)
+	um := updated.(model)
+	if um.status != before {
+		t.Fatalf("quiet sync must not push status, got %q", um.status)
+	}
+	if !um.whiteMode {
+		t.Fatal("Temp>0 with no color must set whiteMode")
+	}
+	if !um.lastSyncOK || um.lastSyncAt.IsZero() {
+		t.Fatal("sync bookkeeping not recorded")
+	}
+}
+
+func TestCommandFailureTriggersResync(t *testing.T) {
+	m := testModel()
+	msg := commandResultMsg{err: errors.New("timeout"), elapsed: time.Millisecond,
+		successMsg: "x", failPrefix: "y"}
+	_, cmd := m.Update(msg)
+	if cmd == nil {
+		t.Fatal("command failure must chain a re-sync command")
+	}
+}
+
 func TestAdjustBrightnessCmdClamps(t *testing.T) {
 	m := testModel()
 	m.brightness = 95
@@ -120,5 +155,56 @@ func TestAdjustBrightnessCmdClamps(t *testing.T) {
 	_ = m.adjustBrightnessCmd(-10)
 	if m.brightness != 1 {
 		t.Fatalf("expected clamp to 1, got %d", m.brightness)
+	}
+}
+
+func TestGroupToggleFlipsOptimisticallyAtDispatch(t *testing.T) {
+	m := testModel()
+	m.savedDevices = []config.SavedDevice{
+		{Name: "Lamp", IP: "192.168.1.9", Port: "38899", Mac: "aa:bb:cc:dd:ee:ff"},
+	}
+	m.groups = []config.Group{
+		{Name: "Living Room", Macs: []string{"aa:bb:cc:dd:ee:ff"}},
+	}
+	m.activeGroup = "Living Room"
+	m.isOn = true
+	m.cursor = 0 // Toggle Power
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(model)
+
+	if um.isOn {
+		t.Fatal("group toggle must flip isOn optimistically at dispatch, not wait for fanoutResultMsg")
+	}
+	if cmd == nil {
+		t.Fatal("expected a fanout command to be dispatched")
+	}
+}
+
+func TestFanoutCmdAggregates(t *testing.T) {
+	srv, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	go func() {
+		buf := make([]byte, 2048)
+		for {
+			if _, _, e := srv.ReadFromUDP(buf); e != nil {
+				return
+			}
+		}
+	}()
+	port := strconv.Itoa(srv.LocalAddr().(*net.UDPAddr).Port)
+
+	targets := [][2]string{{"127.0.0.1", port}, {"127.0.0.1", port}}
+	names := []string{"A", "B"}
+	msg := fanoutCmd(targets, names, "setState", map[string]interface{}{"state": true}, "Room → on")()
+	res, ok := msg.(fanoutResultMsg)
+	if !ok {
+		t.Fatalf("expected fanoutResultMsg, got %T", msg)
+	}
+	if res.ok != 2 || len(res.failed) != 0 {
+		t.Fatalf("expected 2 ok / 0 failed, got %d/%v", res.ok, res.failed)
 	}
 }

@@ -18,6 +18,9 @@ type Config struct {
 	LastColor      string        `json:"lastColor,omitempty"`
 	LastBrightness int           `json:"lastBrightness,omitempty"`
 	LastColorTemp  int           `json:"lastColorTemp,omitempty"`
+	Theme          string        `json:"theme,omitempty"`
+	LastScene      int           `json:"lastScene,omitempty"`
+	Groups         []Group       `json:"groups,omitempty"`
 }
 
 // SavedDevice stores a user-named bulb target for quick reuse.
@@ -26,6 +29,12 @@ type SavedDevice struct {
 	IP   string `json:"ip"`
 	Port string `json:"port"`
 	Mac  string `json:"mac,omitempty"`
+}
+
+// Group names a set of saved devices addressed together.
+type Group struct {
+	Name string   `json:"name"`
+	Macs []string `json:"macs"`
 }
 
 // Path returns the persisted config file location in the user home directory.
