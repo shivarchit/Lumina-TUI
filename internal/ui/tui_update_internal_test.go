@@ -75,3 +75,50 @@ func TestCommandResultSilentSkipsStatusAndTelemetry(t *testing.T) {
 		t.Fatalf("silent result must not record telemetry, total=%d", um.commandTotal)
 	}
 }
+
+func TestNormalizeHex(t *testing.T) {
+	cases := map[string]string{
+		"cba6f7":  "#CBA6F7",
+		"#cba6f7": "#CBA6F7",
+		"#CBA6F7": "#CBA6F7",
+	}
+	for in, want := range cases {
+		if got := normalizeHex(in); got != want {
+			t.Fatalf("normalizeHex(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestAdjustBrightnessCmdStepsImmediately(t *testing.T) {
+	m := testModel()
+	m.brightness = 50
+
+	cmd := m.adjustBrightnessCmd(10)
+	if cmd == nil {
+		t.Fatal("expected a send command")
+	}
+	if m.brightness != 60 {
+		t.Fatalf("brightness must step at dispatch, got %d", m.brightness)
+	}
+
+	// second step before any result arrives must build on the first
+	_ = m.adjustBrightnessCmd(10)
+	if m.brightness != 70 {
+		t.Fatalf("rapid steps must accumulate, got %d", m.brightness)
+	}
+}
+
+func TestAdjustBrightnessCmdClamps(t *testing.T) {
+	m := testModel()
+	m.brightness = 95
+	_ = m.adjustBrightnessCmd(10)
+	if m.brightness != 100 {
+		t.Fatalf("expected clamp to 100, got %d", m.brightness)
+	}
+
+	m.brightness = 5
+	_ = m.adjustBrightnessCmd(-10)
+	if m.brightness != 1 {
+		t.Fatalf("expected clamp to 1, got %d", m.brightness)
+	}
+}

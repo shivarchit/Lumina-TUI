@@ -48,20 +48,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case timerFinishedMsg:
 		m.timerActive = false
-		m.isOn = false
 		if m.detachedTimer {
+			m.isOn = false
 			m = pushStatus(m, statusInfo, "Timer finished (handled in background)")
-		} else {
-			start := time.Now()
-			err := wiz.SendCommand(m.ip, m.port, "setState", map[string]interface{}{"state": false})
-			m.recordCommand(time.Since(start), err)
-			if err != nil {
-				m = pushStatus(m, statusError, fmt.Sprintf("Timer finished. Power off failed: %v", err))
-			} else {
-				m = pushStatus(m, statusSuccess, "Timer finished. Power off.")
-			}
+			return m, nil
 		}
-		return m, nil
+		return m, sendCmd(m.ip, m.port, "setState", map[string]interface{}{"state": false},
+			"Timer finished. Power off.", "Timer finished. Power off failed",
+			func(mm *model) { mm.isOn = false })
 	case discoveryResultMsg:
 		m.discovering = false
 		m.discoveryRuns++
@@ -215,29 +209,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cursor = idx
 				}
 			case "h", "[":
-				m.adjustBrightness(-10)
+				cmds = append(cmds, m.adjustBrightnessCmd(-10))
 			case "l", "]":
-				m.adjustBrightness(10)
+				cmds = append(cmds, m.adjustBrightnessCmd(10))
 			case "-", "_":
-				m.adjustBrightness(-1)
+				cmds = append(cmds, m.adjustBrightnessCmd(-1))
 			case "+", "=":
-				m.adjustBrightness(1)
+				cmds = append(cmds, m.adjustBrightnessCmd(1))
 			case "enter", " ":
 				m.lastKeyWasG = false
 				switch m.cursor {
 				case 0: // Toggle Power
-					m.isOn = !m.isOn
-					start := time.Now()
-					err := wiz.SendCommand(m.ip, m.port, "setState", map[string]interface{}{"state": m.isOn})
-					m.recordCommand(time.Since(start), err)
-					if err != nil {
-						m = pushStatus(m, statusError, fmt.Sprintf("Power toggle failed: %v", err))
-						m.isOn = !m.isOn
-					} else if m.isOn {
-						m = pushStatus(m, statusSuccess, "Power: ON")
-					} else {
-						m = pushStatus(m, statusSuccess, "Power: OFF")
+					target := !m.isOn
+					statusMsg := "Power: OFF"
+					if target {
+						statusMsg = "Power: ON"
 					}
+					cmds = append(cmds, sendCmd(m.ip, m.port, "setState",
+						map[string]interface{}{"state": target},
+						statusMsg, "Power toggle failed",
+						func(mm *model) { mm.isOn = target }))
 				case 1: // Color Grid
 					m.state = colorPickerView
 				case 2: // Hex Colors
@@ -277,40 +268,46 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.colorCursor >= 3 {
 					m.colorCursor -= 3
 					r, g, b, _ := wiz.HexToRGB(colorPalette[m.colorCursor].hex)
-					_ = wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness})
+					cmds = append(cmds, sendCmd(m.ip, m.port, "setPilot",
+						map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness},
+						"", "", nil)) // silent preview
 				}
 			case "down", "j":
 				if m.colorCursor < len(colorPalette)-3 {
 					m.colorCursor += 3
 					r, g, b, _ := wiz.HexToRGB(colorPalette[m.colorCursor].hex)
-					_ = wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness})
+					cmds = append(cmds, sendCmd(m.ip, m.port, "setPilot",
+						map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness},
+						"", "", nil)) // silent preview
 				}
 			case "left", "h":
 				if m.colorCursor > 0 {
 					m.colorCursor--
 					r, g, b, _ := wiz.HexToRGB(colorPalette[m.colorCursor].hex)
-					_ = wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness})
+					cmds = append(cmds, sendCmd(m.ip, m.port, "setPilot",
+						map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness},
+						"", "", nil)) // silent preview
 				}
 			case "right", "l":
 				if m.colorCursor < len(colorPalette)-1 {
 					m.colorCursor++
 					r, g, b, _ := wiz.HexToRGB(colorPalette[m.colorCursor].hex)
-					_ = wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness})
+					cmds = append(cmds, sendCmd(m.ip, m.port, "setPilot",
+						map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness},
+						"", "", nil)) // silent preview
 				}
 			case "enter":
 				selectedHex := colorPalette[m.colorCursor].hex
+				selectedName := colorPalette[m.colorCursor].name
 				r, g, b, _ := wiz.HexToRGB(selectedHex)
-				start := time.Now()
-				err := wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness})
-				m.recordCommand(time.Since(start), err)
-				if err != nil {
-					m = pushStatus(m, statusError, fmt.Sprintf("Color change failed: %v", err))
-				} else {
-					m.currentColor = selectedHex
-					m.isOn = true
-					m = pushStatus(m, statusSuccess, "Color: "+colorPalette[m.colorCursor].name)
-					m.persistConfig()
-				}
+				cmds = append(cmds, sendCmd(m.ip, m.port, "setPilot",
+					map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness},
+					"Color: "+selectedName, "Color change failed",
+					func(mm *model) {
+						mm.currentColor = selectedHex
+						mm.isOn = true
+						mm.persistConfig()
+					}))
 				m.state = menuView
 			}
 		case hexInputView:
@@ -323,17 +320,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if err != nil {
 					m = pushStatus(m, statusError, "Err: Invalid Hex")
 				} else {
-					start := time.Now()
-					cmdErr := wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness})
-					m.recordCommand(time.Since(start), cmdErr)
-					if cmdErr != nil {
-						m = pushStatus(m, statusError, fmt.Sprintf("Color change failed: %v", cmdErr))
-					} else {
-						m.currentColor = val
-						m.isOn = true
-						m = pushStatus(m, statusSuccess, fmt.Sprintf("Color: %s", val))
-						m.persistConfig()
-					}
+					normalized := normalizeHex(val)
+					cmds = append(cmds, sendCmd(m.ip, m.port, "setPilot",
+						map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness},
+						"Color: "+normalized, "Color change failed",
+						func(mm *model) {
+							mm.currentColor = normalized
+							mm.isOn = true
+							mm.persistConfig()
+						}))
 				}
 				m.state = menuView
 			default:
@@ -345,25 +340,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc", "q", "enter":
 				m.state = menuView
 			case "left", "h", "[":
-				m.adjustBrightness(-10)
+				cmds = append(cmds, m.adjustBrightnessCmd(-10))
 			case "right", "l", "]":
-				m.adjustBrightness(10)
+				cmds = append(cmds, m.adjustBrightnessCmd(10))
 			case "-", "_":
-				m.adjustBrightness(-1)
+				cmds = append(cmds, m.adjustBrightnessCmd(-1))
 			case "+", "=":
-				m.adjustBrightness(1)
+				cmds = append(cmds, m.adjustBrightnessCmd(1))
 			}
 		case colorTempView:
 			sendColorTemp := func(k int) {
-				start := time.Now()
-				err := wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"temp": k, "dimming": m.brightness})
-				m.recordCommand(time.Since(start), err)
-				if err != nil {
-					m = pushStatus(m, statusError, fmt.Sprintf("Color temp failed: %v", err))
-				} else {
-					m.colorTemp = k
-					m = pushStatus(m, statusSuccess, fmt.Sprintf("Temp: %dK", k))
-				}
+				m.colorTemp = k
+				cmds = append(cmds, sendCmd(m.ip, m.port, "setPilot",
+					map[string]interface{}{"temp": k, "dimming": m.brightness},
+					fmt.Sprintf("Temp: %dK", k), "Color temp failed",
+					func(mm *model) { mm.persistConfig() }))
 			}
 			switch msg.String() {
 			case "esc", "q", "enter":

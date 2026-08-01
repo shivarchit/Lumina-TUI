@@ -210,8 +210,9 @@ func (m *model) persistConfig() {
 	})
 }
 
-// adjustBrightness modifies the current light brightness by delta, clamping to 1-100%.
-func (m *model) adjustBrightness(delta int) {
+// adjustBrightnessCmd steps brightness by delta (clamped 1-100), updates the
+// model immediately so rapid keypresses accumulate, and returns the async send.
+func (m *model) adjustBrightnessCmd(delta int) tea.Cmd {
 	newVal := m.brightness + delta
 	if newVal > 100 {
 		newVal = 100
@@ -219,19 +220,20 @@ func (m *model) adjustBrightness(delta int) {
 	if newVal < 1 {
 		newVal = 1
 	}
+	m.brightness = newVal
+	m.brightnessHistory = appendBounded(m.brightnessHistory, newVal, 30)
 
-	start := time.Now()
-	err := wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"dimming": newVal})
-	m.recordCommand(time.Since(start), err)
-	if err != nil {
-		*m = pushStatus(*m, statusError, fmt.Sprintf("Brightness change failed: %v", err))
-	} else {
-		m.brightness = newVal
-		m.isOn = true
-		*m = pushStatus(*m, statusSuccess, fmt.Sprintf("Bright: %d%%", m.brightness))
-		m.brightnessHistory = appendBounded(m.brightnessHistory, m.brightness, 30)
-		m.persistConfig()
-	}
+	return sendCmd(m.ip, m.port, "setPilot", map[string]interface{}{"dimming": newVal},
+		fmt.Sprintf("Bright: %d%%", newVal), "Brightness change failed",
+		func(mm *model) {
+			mm.isOn = true
+			mm.persistConfig()
+		})
+}
+
+// normalizeHex canonicalizes user hex input to "#RRGGBB" uppercase.
+func normalizeHex(val string) string {
+	return "#" + strings.ToUpper(strings.TrimPrefix(val, "#"))
 }
 
 type statusLevel int
