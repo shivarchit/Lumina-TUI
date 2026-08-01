@@ -215,6 +215,25 @@ func (m model) View() string {
 			}
 			leftPanel += fmt.Sprintf("%-14s %s%s\n", style.Render(row), swatches, active)
 		}
+	case scenesView:
+		leftPanel = sectionHeader("Scenes", "WiZ built-ins · Enter applies · digits quick-apply") + "\n\n"
+		for i, s := range scenes {
+			label := fmt.Sprintf("%-10s", s.name)
+			style := lipgloss.NewStyle().Foreground(textCol)
+			prefix := "  "
+			if i == m.sceneCursor {
+				style = lipgloss.NewStyle().Foreground(mauve).Bold(true)
+				prefix = "> "
+			}
+			marker := " "
+			if s.id == m.lastScene {
+				marker = lipgloss.NewStyle().Foreground(green).Render("*")
+			}
+			leftPanel += style.Render(prefix+label) + marker + " "
+			if (i+1)%3 == 0 {
+				leftPanel += "\n"
+			}
+		}
 	}
 
 	rightPanel := m.renderDashboard()

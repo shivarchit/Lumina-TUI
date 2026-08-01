@@ -55,3 +55,16 @@ func TestApplyThemeFallsBackToMocha(t *testing.T) {
 	}
 	applyTheme("mocha") // restore for other tests
 }
+
+func TestSceneParams(t *testing.T) {
+	p := sceneParams(4)
+	if p["sceneId"] != 4 {
+		t.Fatalf("sceneParams(4) = %v", p)
+	}
+	if len(scenes) != 12 {
+		t.Fatalf("expected 12 curated scenes, got %d", len(scenes))
+	}
+	if scenes[0].name != "Ocean" || scenes[0].id != 1 {
+		t.Fatalf("first scene must be Ocean/1, got %+v", scenes[0])
+	}
+}

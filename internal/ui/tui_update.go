@@ -230,7 +230,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						statusMsg, "Power toggle failed",
 						func(mm *model) { mm.isOn = target }))
 				case 1: // Scenes
-					m = pushStatus(m, statusInfo, "Scenes arrive later this round")
+					m.state = scenesView
 				case 2: // Groups
 					m = pushStatus(m, statusInfo, "Groups arrive later this round")
 				case 3: // Color Grid
@@ -547,6 +547,58 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.persistConfig()
 				m = pushStatus(m, statusSuccess, "Theme: "+m.themeName)
 				m.state = menuView
+			}
+		case scenesView:
+			preview := func() {
+				cmds = append(cmds, sendCmd(m.ip, m.port, "setPilot",
+					sceneParams(scenes[m.sceneCursor].id), "", "", nil)) // silent preview
+			}
+			apply := func(idx int) {
+				s := scenes[idx]
+				cmds = append(cmds, sendCmd(m.ip, m.port, "setPilot", sceneParams(s.id),
+					"Scene: "+s.name, "Scene failed",
+					func(mm *model) {
+						mm.lastScene = s.id
+						mm.isOn = true
+						mm.persistConfig()
+					}))
+				m.state = menuView
+			}
+			switch msg.String() {
+			case "esc", "q":
+				m.state = menuView
+			case "up", "k":
+				if m.sceneCursor >= 3 {
+					m.sceneCursor -= 3
+					preview()
+				}
+			case "down", "j":
+				if m.sceneCursor < len(scenes)-3 {
+					m.sceneCursor += 3
+					preview()
+				}
+			case "left", "h":
+				if m.sceneCursor > 0 {
+					m.sceneCursor--
+					preview()
+				}
+			case "right", "l":
+				if m.sceneCursor < len(scenes)-1 {
+					m.sceneCursor++
+					preview()
+				}
+			case "enter":
+				apply(m.sceneCursor)
+			case "1", "2", "3", "4", "5", "6", "7", "8", "9", "0":
+				idx, _ := strconv.Atoi(msg.String())
+				if idx == 0 {
+					idx = 10
+				}
+				idx--
+				if idx < len(scenes) {
+					m.sceneCursor = idx
+					apply(idx)
+				}
 			}
 		}
 	}

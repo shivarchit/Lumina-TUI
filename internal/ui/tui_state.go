@@ -32,6 +32,7 @@ const (
 	saveDeviceNameView
 	helpView
 	themesView
+	scenesView
 )
 
 type timerFinishedMsg struct{}
@@ -113,6 +114,21 @@ var colorPalette = []struct{ name, hex string }{
 	{"Lvndr", "#E6E6FA"}, {"Prple", "#800080"}, {"Mgnta", "#FF00FF"},
 }
 
+// scenes are WiZ firmware built-ins addressed by sceneId.
+var scenes = []struct {
+	name string
+	id   int
+}{
+	{"Ocean", 1}, {"Romance", 2}, {"Sunset", 3},
+	{"Party", 4}, {"Fireplace", 5}, {"Cozy", 6},
+	{"Forest", 7}, {"Pastel", 8}, {"Wake-up", 9},
+	{"Bedtime", 10}, {"Daylight", 12}, {"Focus", 15},
+}
+
+func sceneParams(id int) map[string]interface{} {
+	return map[string]interface{}{"sceneId": id}
+}
+
 type model struct {
 	state         sessionState
 	setupStep     int
@@ -120,6 +136,7 @@ type model struct {
 	icons         []string
 	cursor        int
 	colorCursor   int
+	sceneCursor   int
 	status        string
 	ip, port      string
 	isOn          bool
@@ -155,6 +172,7 @@ type model struct {
 	windowHeight       int
 	themeName          string
 	themeCursor        int
+	lastScene          int
 }
 
 // NewModel creates the first TUI model from runtime config.
@@ -225,6 +243,7 @@ func NewModel(cfg config.Config, needsSetup bool) model {
 		discoveryLatencyMs: []int{},
 		windowWidth:        120,
 		windowHeight:       36,
+		lastScene:          cfg.LastScene,
 	}
 }
 
@@ -249,6 +268,7 @@ func (m *model) persistConfig() {
 		LastBrightness: m.brightness,
 		LastColorTemp:  m.colorTemp,
 		Theme:          m.themeName,
+		LastScene:      m.lastScene,
 	})
 }
 
