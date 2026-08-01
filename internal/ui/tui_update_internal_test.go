@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"wiz-tui/internal/config"
+	"wiz-tui/internal/wiz"
 )
 
 func testModel() model {
@@ -105,6 +106,36 @@ func TestAdjustBrightnessCmdStepsImmediately(t *testing.T) {
 	_ = m.adjustBrightnessCmd(10)
 	if m.brightness != 70 {
 		t.Fatalf("rapid steps must accumulate, got %d", m.brightness)
+	}
+}
+
+func TestQuietSyncSkipsStatusAndSetsMode(t *testing.T) {
+	m := testModel()
+	before := m.status
+	msg := stateSyncResultMsg{
+		state: wiz.PilotState{Power: true, Brightness: 50, Temp: 4000},
+		quiet: true, elapsed: 5 * time.Millisecond,
+	}
+	updated, _ := m.Update(msg)
+	um := updated.(model)
+	if um.status != before {
+		t.Fatalf("quiet sync must not push status, got %q", um.status)
+	}
+	if !um.whiteMode {
+		t.Fatal("Temp>0 with no color must set whiteMode")
+	}
+	if !um.lastSyncOK || um.lastSyncAt.IsZero() {
+		t.Fatal("sync bookkeeping not recorded")
+	}
+}
+
+func TestCommandFailureTriggersResync(t *testing.T) {
+	m := testModel()
+	msg := commandResultMsg{err: errors.New("timeout"), elapsed: time.Millisecond,
+		successMsg: "x", failPrefix: "y"}
+	_, cmd := m.Update(msg)
+	if cmd == nil {
+		t.Fatal("command failure must chain a re-sync command")
 	}
 }
 

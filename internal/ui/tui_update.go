@@ -22,8 +22,9 @@ func (m model) Init() tea.Cmd {
 		m.syncingState = true
 		cmds = append(cmds, resolveDeviceCmd(m.activeMac, m.port), m.spinner.Tick)
 	} else if m.state != setupView && m.ip != "" && m.port != "" {
-		cmds = append(cmds, syncDeviceStateCmd(m.ip, m.port))
+		cmds = append(cmds, syncDeviceStateCmd(m.ip, m.port, false))
 	}
+	cmds = append(cmds, pollCmd())
 	return tea.Batch(cmds...)
 }
 
@@ -77,10 +78,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m = pushStatus(m, statusSuccess, fmt.Sprintf("Discovery complete: %d bulb(s)", len(m.discoveredDevices)))
 		}
+	case pollTickMsg:
+		cmds = append(cmds, pollCmd()) // always reschedule
+		if m.state == menuView && m.ip != "" && m.port != "" {
+			cmds = append(cmds, syncDeviceStateCmd(m.ip, m.port, true))
+		}
+		return m, tea.Batch(cmds...)
 	case stateSyncResultMsg:
 		m.syncingState = false
 		m.commandLatencyMs = appendBounded(m.commandLatencyMs, int(msg.elapsed.Milliseconds()), 30)
+		m.lastSyncAt = time.Now()
+		m.lastSyncOK = msg.err == nil
 		if msg.err != nil {
+			if msg.quiet {
+				return m, nil
+			}
 			m = pushStatus(m, statusError, fmt.Sprintf("State sync failed: %v", msg.err))
 			return m, nil
 		}
@@ -95,14 +107,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.state.Temp > 0 {
 			m.colorTemp = msg.state.Temp
 		}
-		m = pushStatus(m, statusSuccess, "State synced")
+		m.whiteMode = msg.state.Temp > 0 && strings.TrimSpace(msg.state.ColorHex) == ""
+		if !msg.quiet {
+			m = pushStatus(m, statusSuccess, "State synced")
+		}
 		return m, nil
 	case macResolutionResultMsg:
 		if msg.err != nil {
 			m.syncingState = false
 			if m.ip != "" && m.port != "" {
 				m.syncingState = true
-				return m, syncDeviceStateCmd(m.ip, m.port)
+				return m, syncDeviceStateCmd(m.ip, m.port, false)
 			}
 			m = pushStatus(m, statusError, fmt.Sprintf("Device not found on network: %v", msg.err))
 			return m, nil
@@ -116,7 +131,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.persistConfig()
 		m.syncingState = true
-		return m, tea.Batch(syncDeviceStateCmd(m.ip, m.port), m.spinner.Tick)
+		return m, tea.Batch(syncDeviceStateCmd(m.ip, m.port, false), m.spinner.Tick)
 	case commandResultMsg:
 		silent := msg.successMsg == "" && msg.failPrefix == ""
 		if !silent {
@@ -126,7 +141,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !silent {
 				m = pushStatus(m, statusError, fmt.Sprintf("%s: %v", msg.failPrefix, msg.err))
 			}
-			return m, nil
+			return m, syncDeviceStateCmd(m.ip, m.port, true)
 		}
 		if msg.onSuccess != nil {
 			msg.onSuccess(&m)
@@ -435,7 +450,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m = pushStatus(m, statusInfo, fmt.Sprintf("Selected: %s (%s)", selectedDevice.Name, selectedDevice.IP))
 					m.state = menuView
 					m.syncingState = true
-					cmds = append(cmds, syncDeviceStateCmd(m.ip, m.port), m.spinner.Tick)
+					cmds = append(cmds, syncDeviceStateCmd(m.ip, m.port, false), m.spinner.Tick)
 				}
 			case "s":
 				if len(m.discoveredDevices) > 0 {
@@ -476,7 +491,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						cmds = append(cmds, resolveDeviceCmd(m.activeMac, m.port), m.spinner.Tick)
 					} else {
 						m.syncingState = true
-						cmds = append(cmds, syncDeviceStateCmd(m.ip, m.port), m.spinner.Tick)
+						cmds = append(cmds, syncDeviceStateCmd(m.ip, m.port, false), m.spinner.Tick)
 					}
 				}
 			case "d":

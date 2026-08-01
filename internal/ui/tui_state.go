@@ -47,6 +47,14 @@ type stateSyncResultMsg struct {
 	state   wiz.PilotState
 	err     error
 	elapsed time.Duration
+	quiet   bool
+}
+
+type pollTickMsg struct{}
+
+// pollCmd schedules the next idle-state heartbeat.
+func pollCmd() tea.Cmd {
+	return tea.Tick(10*time.Second, func(time.Time) tea.Msg { return pollTickMsg{} })
 }
 
 type macResolutionResultMsg struct {
@@ -173,6 +181,10 @@ type model struct {
 	themeName          string
 	themeCursor        int
 	lastScene          int
+
+	lastSyncAt time.Time
+	lastSyncOK bool
+	whiteMode  bool
 }
 
 // NewModel creates the first TUI model from runtime config.
@@ -414,11 +426,11 @@ func discoverDevicesCmd() tea.Cmd {
 }
 
 // syncDeviceStateCmd fetches current target state asynchronously.
-func syncDeviceStateCmd(ip, port string) tea.Cmd {
+func syncDeviceStateCmd(ip, port string, quiet bool) tea.Cmd {
 	return func() tea.Msg {
 		start := time.Now()
 		state, err := wiz.GetPilotState(ip, port)
-		return stateSyncResultMsg{state: state, err: err, elapsed: time.Since(start)}
+		return stateSyncResultMsg{state: state, err: err, elapsed: time.Since(start), quiet: quiet}
 	}
 }
 
@@ -627,11 +639,30 @@ func (m model) renderDashboard() string {
 		Padding(0, 2).
 		Render("  ")
 
+	modeLine := fmt.Sprintf("Mode     %s %s",
+		lipgloss.NewStyle().Background(mauve).Foreground(base).Bold(true).Padding(0, 1).Render("COLOR"),
+		colorSwatch+" "+lipgloss.NewStyle().Foreground(mauve).Render(m.currentColor))
+	if m.whiteMode {
+		modeLine = fmt.Sprintf("Mode     %s %dK",
+			lipgloss.NewStyle().Background(green).Foreground(base).Bold(true).Padding(0, 1).Render("WHITE"),
+			m.colorTemp)
+	}
+	syncLine := "Sync     -"
+	if !m.lastSyncAt.IsZero() {
+		age := int(time.Since(m.lastSyncAt).Seconds())
+		if m.lastSyncOK && age <= 30 {
+			syncLine = lipgloss.NewStyle().Foreground(green).Render(fmt.Sprintf("Sync     live · %ds ago", age))
+		} else {
+			syncLine = lipgloss.NewStyle().Foreground(red).Render(fmt.Sprintf("Sync     stale · %ds ago", age))
+		}
+	}
+
 	core := metricBlock("Core", []string{
 		fmt.Sprintf("Power    %s", powerStyle.Bold(true).Render(powerState)),
 		fmt.Sprintf("Target   %s:%s", m.ip, m.port),
 		aliasLine,
-		fmt.Sprintf("Color    %s %s", colorSwatch, lipgloss.NewStyle().Foreground(mauve).Render(m.currentColor)),
+		modeLine,
+		syncLine,
 	}, blue, 34)
 
 	brightnessBlock := metricBlock("Brightness", []string{
