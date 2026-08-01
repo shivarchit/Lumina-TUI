@@ -198,7 +198,7 @@ func (m model) View() string {
 	}
 
 	rightPanel := m.renderDashboard()
-	actionBlock := renderStatusBlock(m.status, rightWidth-10)
+	actionBlock := renderStatusBlock(m.status, m.statusLevel, rightWidth-10)
 	rightPanel += "\n" + actionBlock
 
 	if m.timerActive {
@@ -277,24 +277,20 @@ func renderDeviceCard(name, endpoint, mac, stateLabel string, style lipgloss.Sty
 	return card.Render(body)
 }
 
-func renderStatusBlock(status string, width int) string {
+func renderStatusBlock(status string, level statusLevel, width int) string {
 	label := "Info"
 	accent := blue
 	textStyle := lipgloss.NewStyle().Foreground(textCol)
-	lower := strings.ToLower(status)
 
-	switch {
-	case strings.Contains(lower, "fail"), strings.Contains(lower, "error"), strings.Contains(lower, "invalid"):
+	switch level {
+	case statusError:
 		label = "Error"
 		accent = red
 		textStyle = lipgloss.NewStyle().Foreground(red)
-	case strings.Contains(lower, "saved"), strings.Contains(lower, "complete"), strings.Contains(lower, "synced"), strings.Contains(lower, "on"):
+	case statusSuccess:
 		label = "Success"
 		accent = green
 		textStyle = lipgloss.NewStyle().Foreground(green)
-	case strings.Contains(lower, "scan"), strings.Contains(lower, "timer"), strings.Contains(lower, "selected"):
-		label = "Info"
-		accent = blue
 	}
 
 	badge := lipgloss.NewStyle().Background(accent).Foreground(base).Bold(true).Padding(0, 1).Render(label)

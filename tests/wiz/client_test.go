@@ -98,3 +98,42 @@ func TestGetPilotStateMissingResult(t *testing.T) {
 		t.Fatalf("expected missing result error, got: %v", err)
 	}
 }
+
+func TestGetPilotStateWhiteMode(t *testing.T) {
+	server, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatalf("failed to start udp server: %v", err)
+	}
+	defer server.Close()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 4096)
+		n, addr, readErr := server.ReadFromUDP(buf)
+		if readErr != nil || n == 0 {
+			return
+		}
+		response := `{"result":{"state":true,"dimming":50,"temp":4000}}`
+		_, _ = server.WriteToUDP([]byte(response), addr)
+	}()
+
+	port := strconv.Itoa(server.LocalAddr().(*net.UDPAddr).Port)
+	state, err := wiz.GetPilotState("127.0.0.1", port)
+	if err != nil {
+		t.Fatalf("GetPilotState failed: %v", err)
+	}
+
+	if state.ColorHex != "" {
+		t.Fatalf("expected empty ColorHex in white mode, got %q", state.ColorHex)
+	}
+	if state.Temp != 4000 {
+		t.Fatalf("expected temp 4000, got %d", state.Temp)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("udp responder did not complete")
+	}
+}

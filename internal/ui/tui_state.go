@@ -52,6 +52,14 @@ type macResolutionResultMsg struct {
 	err    error
 }
 
+type commandResultMsg struct {
+	err        error
+	elapsed    time.Duration
+	onSuccess  func(*model)
+	successMsg string
+	failPrefix string
+}
+
 var (
 	mauve   = lipgloss.Color("#CBA6F7")
 	blue    = lipgloss.Color("#89B4FA")
@@ -108,6 +116,7 @@ type model struct {
 	discoveryLatencyMs []int
 	activeMac          string
 	statusLog          []string
+	statusLevel        statusLevel
 	lastKeyWasG        bool
 	colorTemp          int
 	windowWidth        int
@@ -141,6 +150,10 @@ func NewModel(cfg config.Config, needsSetup bool) model {
 	if cfg.LastBrightness > 0 {
 		initBrightness = cfg.LastBrightness
 	}
+	initTemp := 4000
+	if cfg.LastColorTemp > 0 {
+		initTemp = cfg.LastColorTemp
+	}
 
 	return model{
 		state:              state,
@@ -155,7 +168,7 @@ func NewModel(cfg config.Config, needsSetup bool) model {
 		isOn:               true,
 		currentColor:       initColor,
 		brightness:         initBrightness,
-		colorTemp:          4000,
+		colorTemp:          initTemp,
 		textInput:          ti,
 		spinner:            s,
 		discoveredDevices:  []wiz.Device{},
@@ -170,16 +183,12 @@ func NewModel(cfg config.Config, needsSetup bool) model {
 	}
 }
 
-// activeMac returns the MAC for the currently selected device, if any.
+// activeMac returns the MAC for the saved device matching the current target IP.
 func activeMac(cfg config.Config) string {
 	for _, saved := range cfg.SavedDevices {
 		if saved.IP == cfg.IP && strings.TrimSpace(saved.Mac) != "" {
 			return strings.ToLower(strings.TrimSpace(saved.Mac))
 		}
-	}
-	// fallback: first saved device with a MAC
-	if len(cfg.SavedDevices) > 0 && strings.TrimSpace(cfg.SavedDevices[0].Mac) != "" {
-		return strings.ToLower(strings.TrimSpace(cfg.SavedDevices[0].Mac))
 	}
 	return ""
 }
@@ -193,11 +202,13 @@ func (m *model) persistConfig() {
 		SavedDevices:   m.savedDevices,
 		LastColor:      m.currentColor,
 		LastBrightness: m.brightness,
+		LastColorTemp:  m.colorTemp,
 	})
 }
 
-// adjustBrightness modifies the current light brightness by delta, clamping to 1-100%.
-func (m *model) adjustBrightness(delta int) {
+// adjustBrightnessCmd steps brightness by delta (clamped 1-100), updates the
+// model immediately so rapid keypresses accumulate, and returns the async send.
+func (m *model) adjustBrightnessCmd(delta int) tea.Cmd {
 	newVal := m.brightness + delta
 	if newVal > 100 {
 		newVal = 100
@@ -205,24 +216,34 @@ func (m *model) adjustBrightness(delta int) {
 	if newVal < 1 {
 		newVal = 1
 	}
+	m.brightness = newVal
+	m.brightnessHistory = appendBounded(m.brightnessHistory, newVal, 30)
 
-	start := time.Now()
-	err := wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"dimming": newVal})
-	m.recordCommand(time.Since(start), err)
-	if err != nil {
-		*m = pushStatus(*m, fmt.Sprintf("Brightness change failed: %v", err))
-	} else {
-		m.brightness = newVal
-		m.isOn = true
-		*m = pushStatus(*m, fmt.Sprintf("Bright: %d%%", m.brightness))
-		m.brightnessHistory = appendBounded(m.brightnessHistory, m.brightness, 30)
-		m.persistConfig()
-	}
+	return sendCmd(m.ip, m.port, "setPilot", map[string]interface{}{"dimming": newVal},
+		fmt.Sprintf("Bright: %d%%", newVal), "Brightness change failed",
+		func(mm *model) {
+			mm.isOn = true
+			mm.persistConfig()
+		})
 }
 
+// normalizeHex canonicalizes user hex input to "#RRGGBB" uppercase.
+func normalizeHex(val string) string {
+	return "#" + strings.ToUpper(strings.TrimPrefix(val, "#"))
+}
+
+type statusLevel int
+
+const (
+	statusInfo statusLevel = iota
+	statusSuccess
+	statusError
+)
+
 // pushStatus updates the current status and appends it to the bounded history log.
-func pushStatus(m model, s string) model {
+func pushStatus(m model, level statusLevel, s string) model {
 	m.status = s
+	m.statusLevel = level
 	m.statusLog = appendBoundedStr(m.statusLog, s, 8)
 	return m
 }
@@ -341,6 +362,23 @@ func resolveDeviceCmd(mac, port string) tea.Cmd {
 	return func() tea.Msg {
 		device, err := wiz.DiscoverDeviceByMAC(mac, port, 1500*time.Millisecond)
 		return macResolutionResultMsg{device: device, err: err}
+	}
+}
+
+// sendCmd sends a device command asynchronously. Empty successMsg and
+// failPrefix mark a silent send: no status push, no telemetry.
+func sendCmd(ip, port, method string, params map[string]interface{},
+	successMsg, failPrefix string, onSuccess func(*model)) tea.Cmd {
+	return func() tea.Msg {
+		start := time.Now()
+		err := wiz.SendCommand(ip, port, method, params)
+		return commandResultMsg{
+			err:        err,
+			elapsed:    time.Since(start),
+			onSuccess:  onSuccess,
+			successMsg: successMsg,
+			failPrefix: failPrefix,
+		}
 	}
 }
 
@@ -511,14 +549,6 @@ func (m model) renderDashboard() string {
 		latencyColor = mauve
 	}
 
-	discoveryRate := 0
-	if m.discoveryRuns > 0 {
-		discoveryRate = (m.lastDiscoveryCount * 100) / 10
-		if discoveryRate > 100 {
-			discoveryRate = 100
-		}
-	}
-
 	targetAlias := m.currentTargetSavedName()
 	aliasLine := "Alias    -"
 	if strings.TrimSpace(targetAlias) != "" {
@@ -552,7 +582,6 @@ func (m model) renderDashboard() string {
 	}, green, 34)
 
 	discoveryBlock := metricBlock("Discovery", []string{
-		lipgloss.NewStyle().Foreground(mauve).Render(bar(discoveryRate, 100, 22)),
 		fmt.Sprintf("Runs     %d", m.discoveryRuns),
 		fmt.Sprintf("Last     %d bulbs / %dms", m.lastDiscoveryCount, m.lastDiscoveryMs),
 		lipgloss.NewStyle().Foreground(blue).Render(sparkline(m.discoveryLatencyMs, 22)),

@@ -26,6 +26,7 @@ type PilotState struct {
 	Power      bool
 	Brightness int
 	ColorHex   string
+	Temp       int
 }
 
 // Device describes a discovered WiZ device.
@@ -289,12 +290,19 @@ func GetPilotState(ip, port string) (PilotState, error) {
 			brightness = 100
 		}
 
-		r := asInt(result["r"])
-		g := asInt(result["g"])
-		b := asInt(result["b"])
-		colorHex := fmt.Sprintf("#%02X%02X%02X", clampColor(r), clampColor(g), clampColor(b))
+		_, hasR := result["r"]
+		_, hasG := result["g"]
+		_, hasB := result["b"]
+		colorHex := ""
+		if hasR || hasG || hasB {
+			r := asInt(result["r"])
+			g := asInt(result["g"])
+			b := asInt(result["b"])
+			colorHex = fmt.Sprintf("#%02X%02X%02X", clampColor(r), clampColor(g), clampColor(b))
+		}
+		temp := asInt(result["temp"])
 
-		return PilotState{Power: power, Brightness: brightness, ColorHex: colorHex}, nil
+		return PilotState{Power: power, Brightness: brightness, ColorHex: colorHex, Temp: temp}, nil
 	}
 
 	if lastErr == nil {

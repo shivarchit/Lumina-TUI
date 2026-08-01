@@ -40,3 +40,20 @@ func TestUpdateCtrlCQuits(t *testing.T) {
 		t.Fatal("expected quit command for ctrl+c")
 	}
 }
+
+func TestInvalidHexShowsErrorStatus(t *testing.T) {
+	var mod tea.Model = ui.NewModel(config.Config{IP: "192.168.1.5", Port: "38899"}, false)
+	press := func(msg tea.Msg) {
+		mod, _ = mod.Update(msg)
+	}
+
+	press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")}) // jump cursor to Hex Colors
+	press(tea.KeyMsg{Type: tea.KeyEnter})                     // open hex input
+	press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")}) // type invalid value
+	press(tea.KeyMsg{Type: tea.KeyEnter})                     // submit
+
+	view := mod.View()
+	if !strings.Contains(view, "Error") {
+		t.Fatalf("expected Error badge after invalid hex, view: %q", view)
+	}
+}

@@ -17,6 +17,13 @@ import (
 
 // Run executes CLI handling and starts the interactive Lumina TUI.
 func Run() {
+	for _, a := range os.Args[1:] {
+		if a == "-v" || a == "--version" || a == "version" {
+			fmt.Printf("Lumina-TUI %s\n", version.Version)
+			os.Exit(0)
+		}
+	}
+
 	var (
 		timer    = flag.Int("timer", 0, "sleep timer in minutes; if >0 program will wait and then send a power command")
 		ipFlag   = flag.String("ip", "", "target device IP address (required when --timer > 0)")
@@ -25,13 +32,6 @@ func Run() {
 	)
 
 	flag.Parse()
-
-	for _, a := range os.Args[1:] {
-		if a == "-v" || a == "--version" || a == "version" {
-			fmt.Printf("Lumina-TUI %s\n", version.Version)
-			os.Exit(0)
-		}
-	}
 
 	if *timer > 0 {
 		if err := config.Validate(*ipFlag, *portFlag); err != nil {
