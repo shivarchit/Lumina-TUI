@@ -141,6 +141,10 @@ func NewModel(cfg config.Config, needsSetup bool) model {
 	if cfg.LastBrightness > 0 {
 		initBrightness = cfg.LastBrightness
 	}
+	initTemp := 4000
+	if cfg.LastColorTemp > 0 {
+		initTemp = cfg.LastColorTemp
+	}
 
 	return model{
 		state:              state,
@@ -155,7 +159,7 @@ func NewModel(cfg config.Config, needsSetup bool) model {
 		isOn:               true,
 		currentColor:       initColor,
 		brightness:         initBrightness,
-		colorTemp:          4000,
+		colorTemp:          initTemp,
 		textInput:          ti,
 		spinner:            s,
 		discoveredDevices:  []wiz.Device{},
@@ -193,6 +197,7 @@ func (m *model) persistConfig() {
 		SavedDevices:   m.savedDevices,
 		LastColor:      m.currentColor,
 		LastBrightness: m.brightness,
+		LastColorTemp:  m.colorTemp,
 	})
 }
 

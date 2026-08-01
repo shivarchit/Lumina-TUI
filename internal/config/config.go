@@ -17,6 +17,7 @@ type Config struct {
 	SavedDevices   []SavedDevice `json:"savedDevices,omitempty"`
 	LastColor      string        `json:"lastColor,omitempty"`
 	LastBrightness int           `json:"lastBrightness,omitempty"`
+	LastColorTemp  int           `json:"lastColorTemp,omitempty"`
 }
 
 // SavedDevice stores a user-named bulb target for quick reuse.
@@ -68,11 +69,20 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
-// Save writes config to disk.
+// Save writes config to the default path.
 func Save(cfg Config) error {
+	return SaveTo(Path(), cfg)
+}
+
+// SaveTo writes config to path atomically (temp file + rename).
+func SaveTo(path string, cfg Config) error {
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(Path(), data, 0644)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
