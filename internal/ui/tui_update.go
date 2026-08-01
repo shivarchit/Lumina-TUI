@@ -229,34 +229,40 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						map[string]interface{}{"state": target},
 						statusMsg, "Power toggle failed",
 						func(mm *model) { mm.isOn = target }))
-				case 1: // Color Grid
+				case 1: // Scenes
+					m = pushStatus(m, statusInfo, "Scenes arrive later this round")
+				case 2: // Groups
+					m = pushStatus(m, statusInfo, "Groups arrive later this round")
+				case 3: // Color Grid
 					m.state = colorPickerView
-				case 2: // Hex Colors
+				case 4: // Hex Colors
 					m.state = hexInputView
 					m.textInput.CharLimit = 7
 					m.textInput.Placeholder = "#CBA6F7"
 					m.textInput.SetValue("")
 					m.textInput.Focus()
-				case 3: // Brightness
+				case 5: // Brightness
 					m.state = brightnessView
-				case 4: // Color Temp
+				case 6: // Color Temp
 					m.state = colorTempView
-				case 5: // Sleep Timer
+				case 7: // Sleep Timer
 					m.state = timerInputView
 					m.textInput.CharLimit = 5
 					m.textInput.Placeholder = "Mins (e.g. 15)"
 					m.textInput.SetValue("")
 					m.textInput.Focus()
-				case 6: // Discover Devices
+				case 8: // Discover Devices
 					m.state = discoveryView
 					m.discovering = true
 					m = pushStatus(m, statusInfo, "Scanning local network...")
 					cmds = append(cmds, discoverDevicesCmd(), m.spinner.Tick)
-				case 7: // Saved Devices
+				case 9: // Saved Devices
 					m.state = savedDevicesView
-				case 8: // Help
+				case 10: // Theme
+					m.state = themesView
+				case 11: // Help
 					m.state = helpView
-				case 9: // Exit
+				case 12: // Exit
 					return m, tea.Quit
 				}
 			}
@@ -522,6 +528,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case helpView:
 			switch msg.String() {
 			case "esc", "q", "enter":
+				m.state = menuView
+			}
+		case themesView:
+			switch msg.String() {
+			case "esc", "q":
+				m.state = menuView
+			case "up", "k":
+				if m.themeCursor > 0 {
+					m.themeCursor--
+				}
+			case "down", "j":
+				if m.themeCursor < len(themeOrder)-1 {
+					m.themeCursor++
+				}
+			case "enter":
+				m.themeName = applyTheme(themeOrder[m.themeCursor])
+				m.persistConfig()
+				m = pushStatus(m, statusSuccess, "Theme: "+m.themeName)
 				m.state = menuView
 			}
 		}

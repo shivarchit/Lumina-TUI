@@ -47,7 +47,7 @@ func TestInvalidHexShowsErrorStatus(t *testing.T) {
 		mod, _ = mod.Update(msg)
 	}
 
-	press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3")}) // jump cursor to Hex Colors
+	press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("5")}) // jump cursor to Hex Colors
 	press(tea.KeyMsg{Type: tea.KeyEnter})                     // open hex input
 	press(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("z")}) // type invalid value
 	press(tea.KeyMsg{Type: tea.KeyEnter})                     // submit

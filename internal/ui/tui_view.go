@@ -195,6 +195,26 @@ func (m model) View() string {
 		leftPanel = sectionHeader("Save Device", "Enter display name") + "\n\n"
 		leftPanel += m.textInput.View() + "\n\n"
 		leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("Enter to save · Esc to cancel")
+	case themesView:
+		leftPanel = sectionHeader("Theme", "Enter applies · persists") + "\n\n"
+		for i, name := range themeOrder {
+			t := themes[name]
+			row := "  " + name
+			style := lipgloss.NewStyle().Foreground(subtext)
+			if i == m.themeCursor {
+				row = "> " + name
+				style = lipgloss.NewStyle().Foreground(mauve).Bold(true)
+			}
+			swatches := ""
+			for _, c := range []string{t.mauve, t.blue, t.green, t.red, t.text} {
+				swatches += lipgloss.NewStyle().Foreground(lipgloss.Color(c)).Render("██")
+			}
+			active := ""
+			if name == m.themeName {
+				active = lipgloss.NewStyle().Foreground(green).Render("  active")
+			}
+			leftPanel += fmt.Sprintf("%-14s %s%s\n", style.Render(row), swatches, active)
+		}
 	}
 
 	rightPanel := m.renderDashboard()

@@ -39,3 +39,19 @@ func TestActiveMac(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyThemeFallsBackToMocha(t *testing.T) {
+	if got := applyTheme("nonsense"); got != "mocha" {
+		t.Fatalf("unknown theme must resolve to mocha, got %q", got)
+	}
+	if got := applyTheme(""); got != "mocha" {
+		t.Fatalf("empty theme must resolve to mocha, got %q", got)
+	}
+	if got := applyTheme("latte"); got != "latte" {
+		t.Fatalf("known theme must resolve to itself, got %q", got)
+	}
+	if string(mauve) != themes["latte"].mauve {
+		t.Fatalf("applyTheme must reassign package colors: mauve=%s want %s", mauve, themes["latte"].mauve)
+	}
+	applyTheme("mocha") // restore for other tests
+}

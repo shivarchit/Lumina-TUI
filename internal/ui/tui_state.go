@@ -31,6 +31,7 @@ const (
 	savedDevicesView
 	saveDeviceNameView
 	helpView
+	themesView
 )
 
 type timerFinishedMsg struct{}
@@ -60,16 +61,47 @@ type commandResultMsg struct {
 	failPrefix string
 }
 
+type theme struct {
+	mauve, blue, green, red, text, subtext, surface, base string
+}
+
+var themes = map[string]theme{
+	"mocha":     {"#CBA6F7", "#89B4FA", "#A6E3A1", "#F38BA8", "#CDD6F4", "#6C7086", "#313244", "#1E1E2E"},
+	"macchiato": {"#C6A0F6", "#8AADF4", "#A6DA95", "#ED8796", "#CAD3F5", "#6E738D", "#363A4F", "#24273A"},
+	"frappe":    {"#CA9EE6", "#8CAAEE", "#A6D189", "#E78284", "#C6D0F5", "#737994", "#414559", "#303446"},
+	"latte":     {"#8839EF", "#1E66F5", "#40A02B", "#D20F39", "#4C4F69", "#9CA0B0", "#CCD0DA", "#EFF1F5"},
+	"dracula":   {"#BD93F9", "#8BE9FD", "#50FA7B", "#FF5555", "#F8F8F2", "#6272A4", "#44475A", "#282A36"},
+	"gruvbox":   {"#D3869B", "#83A598", "#B8BB26", "#FB4934", "#EBDBB2", "#928374", "#3C3836", "#282828"},
+}
+
+// themeOrder fixes menu ordering (maps are unordered).
+var themeOrder = []string{"mocha", "macchiato", "frappe", "latte", "dracula", "gruvbox"}
+
 var (
-	mauve   = lipgloss.Color("#CBA6F7")
-	blue    = lipgloss.Color("#89B4FA")
-	green   = lipgloss.Color("#A6E3A1")
-	red     = lipgloss.Color("#F38BA8")
-	textCol = lipgloss.Color("#CDD6F4")
-	subtext = lipgloss.Color("#6C7086")
-	surface = lipgloss.Color("#313244")
-	base    = lipgloss.Color("#1E1E2E")
+	mauve   lipgloss.Color
+	blue    lipgloss.Color
+	green   lipgloss.Color
+	red     lipgloss.Color
+	textCol lipgloss.Color
+	subtext lipgloss.Color
+	surface lipgloss.Color
+	base    lipgloss.Color
 )
+
+// applyTheme reassigns the package color vars; unknown names fall back to mocha.
+// ponytail: package-global palette, fine for a single-model TUI process.
+func applyTheme(name string) string {
+	t, ok := themes[name]
+	if !ok {
+		name = "mocha"
+		t = themes[name]
+	}
+	mauve, blue, green, red = lipgloss.Color(t.mauve), lipgloss.Color(t.blue), lipgloss.Color(t.green), lipgloss.Color(t.red)
+	textCol, subtext, surface, base = lipgloss.Color(t.text), lipgloss.Color(t.subtext), lipgloss.Color(t.surface), lipgloss.Color(t.base)
+	return name
+}
+
+func init() { applyTheme("mocha") }
 
 var colorPalette = []struct{ name, hex string }{
 	{"Warm", "#FFB56B"}, {"Day", "#FFE4CE"}, {"Cool", "#E0F7FA"},
@@ -121,6 +153,8 @@ type model struct {
 	colorTemp          int
 	windowWidth        int
 	windowHeight       int
+	themeName          string
+	themeCursor        int
 }
 
 // NewModel creates the first TUI model from runtime config.
@@ -155,11 +189,22 @@ func NewModel(cfg config.Config, needsSetup bool) model {
 		initTemp = cfg.LastColorTemp
 	}
 
+	themeName := applyTheme(cfg.Theme)
+	themeCursor := 0
+	for i, name := range themeOrder {
+		if name == themeName {
+			themeCursor = i
+			break
+		}
+	}
+
 	return model{
 		state:              state,
 		setupStep:          0,
-		choices:            []string{"Toggle Power", "Color Grid", "Hex Colors", "Brightness", "Color Temp", "Sleep Timer", "Discover Devices", "Saved Devices", "Help", "Exit"},
-		icons:              []string{"PWR", "CLR", "HEX", "BRT", "CCT", "TMR", "DSC", "SAV", "HLP", "EXT"},
+		choices:            []string{"Toggle Power", "Scenes", "Groups", "Color Grid", "Hex Colors", "Brightness", "Color Temp", "Sleep Timer", "Discover Devices", "Saved Devices", "Theme", "Help", "Exit"},
+		icons:              []string{"PWR", "SCN", "GRP", "CLR", "HEX", "BRT", "CCT", "TMR", "DSC", "SAV", "THM", "HLP", "EXT"},
+		themeName:          themeName,
+		themeCursor:        themeCursor,
 		status:             "Ready.",
 		statusLog:          []string{"Ready."},
 		ip:                 cfg.IP,
@@ -203,6 +248,7 @@ func (m *model) persistConfig() {
 		LastColor:      m.currentColor,
 		LastBrightness: m.brightness,
 		LastColorTemp:  m.colorTemp,
+		Theme:          m.themeName,
 	})
 }
 

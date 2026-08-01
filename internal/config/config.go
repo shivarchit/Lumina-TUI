@@ -18,6 +18,7 @@ type Config struct {
 	LastColor      string        `json:"lastColor,omitempty"`
 	LastBrightness int           `json:"lastBrightness,omitempty"`
 	LastColorTemp  int           `json:"lastColorTemp,omitempty"`
+	Theme          string        `json:"theme,omitempty"`
 }
 
 // SavedDevice stores a user-named bulb target for quick reuse.
