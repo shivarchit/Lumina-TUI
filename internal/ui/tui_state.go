@@ -108,6 +108,7 @@ type model struct {
 	discoveryLatencyMs []int
 	activeMac          string
 	statusLog          []string
+	statusLevel        statusLevel
 	lastKeyWasG        bool
 	colorTemp          int
 	windowWidth        int
@@ -215,19 +216,28 @@ func (m *model) adjustBrightness(delta int) {
 	err := wiz.SendCommand(m.ip, m.port, "setPilot", map[string]interface{}{"dimming": newVal})
 	m.recordCommand(time.Since(start), err)
 	if err != nil {
-		*m = pushStatus(*m, fmt.Sprintf("Brightness change failed: %v", err))
+		*m = pushStatus(*m, statusError, fmt.Sprintf("Brightness change failed: %v", err))
 	} else {
 		m.brightness = newVal
 		m.isOn = true
-		*m = pushStatus(*m, fmt.Sprintf("Bright: %d%%", m.brightness))
+		*m = pushStatus(*m, statusSuccess, fmt.Sprintf("Bright: %d%%", m.brightness))
 		m.brightnessHistory = appendBounded(m.brightnessHistory, m.brightness, 30)
 		m.persistConfig()
 	}
 }
 
+type statusLevel int
+
+const (
+	statusInfo statusLevel = iota
+	statusSuccess
+	statusError
+)
+
 // pushStatus updates the current status and appends it to the bounded history log.
-func pushStatus(m model, s string) model {
+func pushStatus(m model, level statusLevel, s string) model {
 	m.status = s
+	m.statusLevel = level
 	m.statusLog = appendBoundedStr(m.statusLog, s, 8)
 	return m
 }
