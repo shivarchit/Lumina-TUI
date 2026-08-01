@@ -65,7 +65,27 @@ It is built in Go with Bubble Tea and is intended for fast, local control from t
 
 ## Installation
 
-### Prerequisites
+### Quick install (recommended)
+
+macOS / Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shivarchit/Lumina-TUI/master/install.sh | bash
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/shivarchit/Lumina-TUI/master/install.ps1 | iex
+```
+
+Both download the latest release binary for your platform and put `lumina` on your PATH. No Go toolchain needed.
+
+---
+
+### Build from source
+
+#### Prerequisites
 
 - Go 1.25 or higher installed on your machine.
 
