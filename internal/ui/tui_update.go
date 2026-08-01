@@ -98,6 +98,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.TrimSpace(msg.state.ColorHex) != "" {
 			m.currentColor = msg.state.ColorHex
 		}
+		if msg.state.Temp > 0 {
+			m.colorTemp = msg.state.Temp
+		}
 		m = pushStatus(m, "State synced")
 		return m, nil
 	case macResolutionResultMsg:
