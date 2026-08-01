@@ -183,16 +183,12 @@ func NewModel(cfg config.Config, needsSetup bool) model {
 	}
 }
 
-// activeMac returns the MAC for the currently selected device, if any.
+// activeMac returns the MAC for the saved device matching the current target IP.
 func activeMac(cfg config.Config) string {
 	for _, saved := range cfg.SavedDevices {
 		if saved.IP == cfg.IP && strings.TrimSpace(saved.Mac) != "" {
 			return strings.ToLower(strings.TrimSpace(saved.Mac))
 		}
-	}
-	// fallback: first saved device with a MAC
-	if len(cfg.SavedDevices) > 0 && strings.TrimSpace(cfg.SavedDevices[0].Mac) != "" {
-		return strings.ToLower(strings.TrimSpace(cfg.SavedDevices[0].Mac))
 	}
 	return ""
 }
