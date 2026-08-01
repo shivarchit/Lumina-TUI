@@ -12,6 +12,7 @@
 - README screenshots generated from the real UI (`docs/screenshots/`).
 
 ### Fixed
+- Installer now upgrades an existing `lumina` in place, preventing a stale copy earlier on PATH from shadowing the new version.
 - Color Temp view rendered a blank panel (missing view case since the feature shipped).
 - Group power toggle could get stuck one-way; now flips optimistically.
 - Persisted theme now styles text inputs and spinner at boot.
