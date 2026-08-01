@@ -112,6 +112,12 @@ func (m model) View() string {
 		leftPanel += lipgloss.NewStyle().Foreground(blue).Render(sparkline(m.brightnessHistory, 28)) + "\n"
 		leftPanel += fmt.Sprintf("Level  %d%%\n\n", m.brightness)
 		leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("h/l/[] to adjust (10%) · -/+ to adjust (1%) · Enter/Esc to return")
+	case colorTempView:
+		leftPanel = sectionHeader("Color Temp", "White mode, 2200-6500K") + "\n\n"
+		leftPanel += lipgloss.NewStyle().Foreground(mauve).Render(bar(m.colorTemp-2200, 6500-2200, 28)) + "\n"
+		leftPanel += fmt.Sprintf("Temp   %dK\n", m.colorTemp)
+		leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("warm 2200K ─ 6500K cool") + "\n\n"
+		leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("h/l to adjust (100K) · -/+ to adjust (10K) · Enter/Esc to return")
 	case timerInputView:
 		leftPanel = sectionHeader("Sleep Timer", "Minutes") + "\n\n"
 		leftPanel += lipgloss.NewStyle().Foreground(subtext).Render("Set minutes until automatic power off") + "\n\n"
