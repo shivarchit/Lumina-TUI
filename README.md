@@ -6,6 +6,8 @@ Lumina-TUI is a terminal user interface for controlling WiZ smart lights and plu
 
 It is built in Go with Bubble Tea and is intended for fast, local control from the terminal.
 
+![Lumina-TUI main dashboard](docs/screenshots/main.svg)
+
 ---
 
 ## Features
@@ -13,6 +15,27 @@ It is built in Go with Bubble Tea and is intended for fast, local control from t
 - **Zero cloud dependency**  
   Communicates directly with your lights over your local network using UDP port `38899`.  
   No accounts, no cloud, instant response times.
+
+- **Live dashboard**  
+  A 10-second sync heartbeat keeps the panel honest even when the bulb changes from the phone app. The Core panel shows the real mode — `WHITE` with kelvin, or `COLOR` with a swatch — plus a `live · Ns ago` sync indicator.
+
+- **Scenes**  
+  Twelve WiZ firmware scenes (Ocean, Party, Fireplace, Focus, ...) in a grid with live preview while you browse and digit keys for one-press apply.
+
+  ![Scenes view](docs/screenshots/scenes.svg)
+
+- **Device groups**  
+  Name a set of saved bulbs and target them together — power, brightness, color, temp, and scenes fan out concurrently with one aggregated result line ("Living Room → Power: ON (3/3 ok)").
+
+  ![Groups view](docs/screenshots/groups.svg)
+
+- **Themes**  
+  Six built-in palettes — Catppuccin Mocha (default), Macchiato, Frappé, Latte for light terminals, Dracula, and Gruvbox — applied live and persisted.
+
+  ![Themes view](docs/screenshots/themes.svg)
+
+- **Scriptable CLI**  
+  Every core action works headless: `lumina on`, `lumina color '#89B4FA'`, `lumina scene party`, `lumina status`. Bare `lumina` opens the TUI. Pairs with cron for scheduling.
 
 - **21-color visual grid**  
   A fully interactive, responsive grid of curated colors for quick mood setting.
@@ -141,14 +164,41 @@ lumina
 
 The interface is fully keyboard-driven:
 
-- `Up` / `Down` or `k` / `j` - Navigate the menu and color grid  
+- `Up` / `Down` or `k` / `j` - Navigate the menu, grids, and lists  
 - `Left` / `Right` or `h` / `l` - Adjust brightness or move horizontally  
-- `Enter` - Select / Confirm  
+- `1`-`9`, `0` - Jump to menu entries; in Scenes, apply a scene instantly  
+- `Enter` - Select / Confirm / Target a group  
 - `r` - Refresh device discovery scan  
 - `s` - Save selected discovered device with a custom name  
-- `d` - Delete selected saved device  
-- `Esc` - Cancel input mode  
+- `d` - Delete selected saved device or group  
+- `n` / `e` / `Space` - New group / edit members / toggle membership (Groups view)  
+- `Esc` - Cancel input mode / back out  
 - `q` or `Ctrl + C` - Quit application  
+
+---
+
+## CLI
+
+Every core action is scriptable without opening the TUI — bare `lumina` still opens it:
+
+```bash
+lumina on                    # power on the active device
+lumina off
+lumina color '#89B4FA'       # any hex color
+lumina temp 4000             # white mode, 2200-6500 K
+lumina scene party           # by name (ocean, romance, sunset, party, fireplace,
+                             # cozy, forest, pastel, wake-up, bedtime, daylight, focus)
+lumina scene 27              # or any WiZ scene id 1-32
+lumina status                # one line per saved device
+lumina discover              # scan the local network
+```
+
+Scheduling needs nothing extra — pair it with cron:
+
+```cron
+0 21 * * * lumina temp 2700   # warm white every evening
+0 23 * * * lumina off
+```
 
 ---
 
@@ -157,14 +207,14 @@ The interface is fully keyboard-driven:
 Lumina-TUI follows a modular architecture:
 
 - `internal/main.go` - CLI entry point  
-- `internal/app/run.go` - startup flow and CLI mode handling  
+- `internal/app/run.go` - startup flow, CLI verbs, and timer worker  
 - `internal/config/config.go` - config validation and persistence  
 - `internal/ui/` - Bubble Tea model, update loop, and rendering  
 - `internal/wiz/client.go` - UDP networking and discovery logic  
 - `internal/version/version.go` - application version constant  
 - `build/release.sh` - cross-platform release build script  
-- `tests/ui/` - UI package black-box tests  
-- `tests/wiz/` - WiZ client tests  
+- `docs/screenshots/` - README screenshots (regenerate: `GEN_SCREENSHOTS=$(pwd)/docs/screenshots go test ./internal/ui -run TestGenerateScreenshots`)  
+- `tests/` - black-box tests per package (`app`, `config`, `ui`, `wiz`)  
 
 ---
 
