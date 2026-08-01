@@ -549,14 +549,6 @@ func (m model) renderDashboard() string {
 		latencyColor = mauve
 	}
 
-	discoveryRate := 0
-	if m.discoveryRuns > 0 {
-		discoveryRate = (m.lastDiscoveryCount * 100) / 10
-		if discoveryRate > 100 {
-			discoveryRate = 100
-		}
-	}
-
 	targetAlias := m.currentTargetSavedName()
 	aliasLine := "Alias    -"
 	if strings.TrimSpace(targetAlias) != "" {
@@ -590,7 +582,6 @@ func (m model) renderDashboard() string {
 	}, green, 34)
 
 	discoveryBlock := metricBlock("Discovery", []string{
-		lipgloss.NewStyle().Foreground(mauve).Render(bar(discoveryRate, 100, 22)),
 		fmt.Sprintf("Runs     %d", m.discoveryRuns),
 		fmt.Sprintf("Last     %d bulbs / %dms", m.lastDiscoveryCount, m.lastDiscoveryMs),
 		lipgloss.NewStyle().Foreground(blue).Render(sparkline(m.discoveryLatencyMs, 22)),

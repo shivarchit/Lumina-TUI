@@ -14,7 +14,7 @@ It is built in Go with Bubble Tea and is intended for fast, local control from t
   Communicates directly with your lights over your local network using UDP port `38899`.  
   No accounts, no cloud, instant response times.
 
-- **24-color visual grid**  
+- **21-color visual grid**  
   A fully interactive, responsive grid of curated colors for quick mood setting.
 
 - **Custom hex input**  
@@ -44,7 +44,7 @@ It is built in Go with Bubble Tea and is intended for fast, local control from t
 
 ### Prerequisites
 
-- Go 1.18 or higher installed on your machine.
+- Go 1.25 or higher installed on your machine.
 
 ---
 
