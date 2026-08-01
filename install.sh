@@ -31,9 +31,16 @@ esac
 asset="lumina-${os_tag}-${arch_tag}"
 url="https://github.com/${REPO}/releases/latest/download/${asset}"
 
-# Prefer /usr/local/bin when writable, else ~/.local/bin
-install_dir="/usr/local/bin"
-if [ ! -w "$install_dir" ]; then
+# Upgrade in place if an existing writable install is found (avoids a stale
+# copy earlier on PATH shadowing the new one), else /usr/local/bin when
+# writable, else ~/.local/bin.
+install_dir=""
+existing="$(command -v "$BIN_NAME" 2>/dev/null || true)"
+if [ -n "$existing" ] && [ -w "$existing" ]; then
+    install_dir="$(dirname "$existing")"
+elif [ -w "/usr/local/bin" ]; then
+    install_dir="/usr/local/bin"
+else
     install_dir="$HOME/.local/bin"
     mkdir -p "$install_dir"
 fi
