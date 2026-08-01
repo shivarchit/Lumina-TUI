@@ -197,27 +197,28 @@ func runCLI(verb string, args []string) {
 		}
 		fmt.Printf("%s:%s → scene %s\n", cfg.IP, cfg.Port, args[0])
 	case "status":
-		targets := [][2]string{}
+		type target struct{ ip, port, name string }
+		targets := []target{}
 		for _, d := range cfg.SavedDevices {
 			if d.IP != "" {
 				port := d.Port
 				if port == "" {
 					port = cfg.Port
 				}
-				targets = append(targets, [2]string{d.IP, port})
+				name := d.Name
+				if name == "" {
+					name = d.IP
+				}
+				targets = append(targets, target{d.IP, port, name})
 			}
 		}
 		if len(targets) == 0 {
-			targets = append(targets, [2]string{cfg.IP, cfg.Port})
+			targets = append(targets, target{cfg.IP, cfg.Port, cfg.IP})
 		}
-		for i, t := range targets {
-			name := t[0]
-			if i < len(cfg.SavedDevices) && cfg.SavedDevices[i].Name != "" {
-				name = cfg.SavedDevices[i].Name
-			}
-			st, err := wiz.GetPilotState(t[0], t[1])
+		for _, t := range targets {
+			st, err := wiz.GetPilotState(t.ip, t.port)
 			if err != nil {
-				fmt.Printf("%-16s unreachable: %v\n", name, err)
+				fmt.Printf("%-16s unreachable: %v\n", t.name, err)
 				continue
 			}
 			power := "off"
@@ -228,7 +229,7 @@ func runCLI(verb string, args []string) {
 			if st.Temp > 0 && st.ColorHex == "" {
 				detail = fmt.Sprintf("%dK", st.Temp)
 			}
-			fmt.Printf("%-16s %s · %d%% · %s\n", name, power, st.Brightness, detail)
+			fmt.Printf("%-16s %s · %d%% · %s\n", t.name, power, st.Brightness, detail)
 		}
 	case "discover":
 		devices, err := wiz.DiscoverDevices()
