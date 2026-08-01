@@ -1,0 +1,77 @@
+package ui
+
+import (
+	"errors"
+	"testing"
+	"time"
+
+	"wiz-tui/internal/config"
+)
+
+func testModel() model {
+	return NewModel(config.Config{IP: "192.168.1.5", Port: "38899"}, false)
+}
+
+func TestCommandResultSuccessAppliesMutation(t *testing.T) {
+	m := testModel()
+	msg := commandResultMsg{
+		elapsed:    5 * time.Millisecond,
+		successMsg: "Power: ON",
+		failPrefix: "Power toggle failed",
+		onSuccess:  func(mm *model) { mm.isOn = true },
+	}
+
+	updated, _ := m.Update(msg)
+	um := updated.(model)
+
+	if !um.isOn {
+		t.Fatal("onSuccess mutation not applied")
+	}
+	if um.status != "Power: ON" || um.statusLevel != statusSuccess {
+		t.Fatalf("expected success status, got %q level %d", um.status, um.statusLevel)
+	}
+	if um.commandTotal != 1 || um.commandFailed != 0 {
+		t.Fatalf("telemetry not recorded: total=%d failed=%d", um.commandTotal, um.commandFailed)
+	}
+}
+
+func TestCommandResultErrorSkipsMutation(t *testing.T) {
+	m := testModel()
+	m.isOn = false
+	msg := commandResultMsg{
+		err:        errors.New("timeout"),
+		elapsed:    5 * time.Millisecond,
+		successMsg: "Power: ON",
+		failPrefix: "Power toggle failed",
+		onSuccess:  func(mm *model) { mm.isOn = true },
+	}
+
+	updated, _ := m.Update(msg)
+	um := updated.(model)
+
+	if um.isOn {
+		t.Fatal("mutation must not run on error")
+	}
+	if um.statusLevel != statusError {
+		t.Fatalf("expected error status level, got %d", um.statusLevel)
+	}
+	if um.commandFailed != 1 {
+		t.Fatalf("failure not recorded: failed=%d", um.commandFailed)
+	}
+}
+
+func TestCommandResultSilentSkipsStatusAndTelemetry(t *testing.T) {
+	m := testModel()
+	before := m.status
+	msg := commandResultMsg{elapsed: 5 * time.Millisecond} // successMsg=="" && failPrefix=="" -> silent
+
+	updated, _ := m.Update(msg)
+	um := updated.(model)
+
+	if um.status != before {
+		t.Fatalf("silent result must not change status, got %q", um.status)
+	}
+	if um.commandTotal != 0 {
+		t.Fatalf("silent result must not record telemetry, total=%d", um.commandTotal)
+	}
+}

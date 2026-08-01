@@ -123,6 +123,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.persistConfig()
 		m.syncingState = true
 		return m, tea.Batch(syncDeviceStateCmd(m.ip, m.port), m.spinner.Tick)
+	case commandResultMsg:
+		silent := msg.successMsg == "" && msg.failPrefix == ""
+		if !silent {
+			m.recordCommand(msg.elapsed, msg.err)
+		}
+		if msg.err != nil {
+			if !silent {
+				m = pushStatus(m, statusError, fmt.Sprintf("%s: %v", msg.failPrefix, msg.err))
+			}
+			return m, nil
+		}
+		if msg.onSuccess != nil {
+			msg.onSuccess(&m)
+		}
+		if !silent {
+			m = pushStatus(m, statusSuccess, msg.successMsg)
+		}
+		return m, nil
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit

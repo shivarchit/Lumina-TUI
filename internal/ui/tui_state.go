@@ -52,6 +52,14 @@ type macResolutionResultMsg struct {
 	err    error
 }
 
+type commandResultMsg struct {
+	err        error
+	elapsed    time.Duration
+	onSuccess  func(*model)
+	successMsg string
+	failPrefix string
+}
+
 var (
 	mauve   = lipgloss.Color("#CBA6F7")
 	blue    = lipgloss.Color("#89B4FA")
@@ -356,6 +364,23 @@ func resolveDeviceCmd(mac, port string) tea.Cmd {
 	return func() tea.Msg {
 		device, err := wiz.DiscoverDeviceByMAC(mac, port, 1500*time.Millisecond)
 		return macResolutionResultMsg{device: device, err: err}
+	}
+}
+
+// sendCmd sends a device command asynchronously. Empty successMsg and
+// failPrefix mark a silent send: no status push, no telemetry.
+func sendCmd(ip, port, method string, params map[string]interface{},
+	successMsg, failPrefix string, onSuccess func(*model)) tea.Cmd {
+	return func() tea.Msg {
+		start := time.Now()
+		err := wiz.SendCommand(ip, port, method, params)
+		return commandResultMsg{
+			err:        err,
+			elapsed:    time.Since(start),
+			onSuccess:  onSuccess,
+			successMsg: successMsg,
+			failPrefix: failPrefix,
+		}
 	}
 }
 
