@@ -2,6 +2,8 @@ package ui
 
 import (
 	"errors"
+	"net"
+	"strconv"
 	"testing"
 	"time"
 
@@ -151,5 +153,33 @@ func TestAdjustBrightnessCmdClamps(t *testing.T) {
 	_ = m.adjustBrightnessCmd(-10)
 	if m.brightness != 1 {
 		t.Fatalf("expected clamp to 1, got %d", m.brightness)
+	}
+}
+
+func TestFanoutCmdAggregates(t *testing.T) {
+	srv, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	go func() {
+		buf := make([]byte, 2048)
+		for {
+			if _, _, e := srv.ReadFromUDP(buf); e != nil {
+				return
+			}
+		}
+	}()
+	port := strconv.Itoa(srv.LocalAddr().(*net.UDPAddr).Port)
+
+	targets := [][2]string{{"127.0.0.1", port}, {"127.0.0.1", port}}
+	names := []string{"A", "B"}
+	msg := fanoutCmd(targets, names, "setState", map[string]interface{}{"state": true}, "Room → on")()
+	res, ok := msg.(fanoutResultMsg)
+	if !ok {
+		t.Fatalf("expected fanoutResultMsg, got %T", msg)
+	}
+	if res.ok != 2 || len(res.failed) != 0 {
+		t.Fatalf("expected 2 ok / 0 failed, got %d/%v", res.ok, res.failed)
 	}
 }

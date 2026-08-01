@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +34,8 @@ const (
 	helpView
 	themesView
 	scenesView
+	groupsView
+	groupNameView
 )
 
 type timerFinishedMsg struct{}
@@ -182,6 +185,12 @@ type model struct {
 	themeCursor        int
 	lastScene          int
 
+	groups       []config.Group
+	groupCursor  int
+	memberCursor int
+	editingGroup int
+	activeGroup  string
+
 	lastSyncAt time.Time
 	lastSyncOK bool
 	whiteMode  bool
@@ -256,6 +265,8 @@ func NewModel(cfg config.Config, needsSetup bool) model {
 		windowWidth:        120,
 		windowHeight:       36,
 		lastScene:          cfg.LastScene,
+		groups:             cfg.Groups,
+		editingGroup:       -1,
 	}
 }
 
@@ -281,6 +292,7 @@ func (m *model) persistConfig() {
 		LastColorTemp:  m.colorTemp,
 		Theme:          m.themeName,
 		LastScene:      m.lastScene,
+		Groups:         m.groups,
 	})
 }
 
@@ -297,7 +309,7 @@ func (m *model) adjustBrightnessCmd(delta int) tea.Cmd {
 	m.brightness = newVal
 	m.brightnessHistory = appendBounded(m.brightnessHistory, newVal, 30)
 
-	return sendCmd(m.ip, m.port, "setPilot", map[string]interface{}{"dimming": newVal},
+	return m.sendToTarget("setPilot", map[string]interface{}{"dimming": newVal},
 		fmt.Sprintf("Bright: %d%%", newVal), "Brightness change failed",
 		func(mm *model) {
 			mm.isOn = true
@@ -458,6 +470,87 @@ func sendCmd(ip, port, method string, params map[string]interface{},
 			failPrefix: failPrefix,
 		}
 	}
+}
+
+type fanoutResultMsg struct {
+	label   string
+	ok      int
+	failed  []string
+	elapsed time.Duration
+}
+
+// fanoutCmd sends one command to every target concurrently and aggregates.
+func fanoutCmd(targets [][2]string, names []string, method string, params map[string]interface{}, label string) tea.Cmd {
+	return func() tea.Msg {
+		start := time.Now()
+		type result struct {
+			idx int
+			err error
+		}
+		results := make(chan result, len(targets))
+		for i, t := range targets {
+			go func(i int, ip, port string) {
+				results <- result{i, wiz.SendCommand(ip, port, method, params)}
+			}(i, t[0], t[1])
+		}
+		res := fanoutResultMsg{label: label}
+		for range targets {
+			r := <-results
+			if r.err != nil {
+				res.failed = append(res.failed, names[r.idx])
+			} else {
+				res.ok++
+			}
+		}
+		sort.Strings(res.failed)
+		res.elapsed = time.Since(start)
+		return res
+	}
+}
+
+// groupTargets resolves the active group's MACs to (ip,port) pairs via saved devices.
+func (m *model) groupTargets() ([][2]string, []string) {
+	var g *config.Group
+	for i := range m.groups {
+		if m.groups[i].Name == m.activeGroup {
+			g = &m.groups[i]
+			break
+		}
+	}
+	if g == nil {
+		return nil, nil
+	}
+	byMac := map[string]config.SavedDevice{}
+	for _, d := range m.savedDevices {
+		byMac[strings.ToLower(strings.TrimSpace(d.Mac))] = d
+	}
+	var targets [][2]string
+	var names []string
+	for _, mac := range g.Macs {
+		d, ok := byMac[strings.ToLower(strings.TrimSpace(mac))]
+		if !ok || d.IP == "" {
+			continue // member no longer saved; skipped silently
+		}
+		port := d.Port
+		if port == "" {
+			port = m.port
+		}
+		targets = append(targets, [2]string{d.IP, port})
+		names = append(names, d.Name)
+	}
+	return targets, names
+}
+
+// sendToTarget routes a device command to the active group (fan-out) or the single target.
+func (m *model) sendToTarget(method string, params map[string]interface{}, successMsg, failPrefix string, onSuccess func(*model)) tea.Cmd {
+	if m.activeGroup == "" {
+		return sendCmd(m.ip, m.port, method, params, successMsg, failPrefix, onSuccess)
+	}
+	targets, names := m.groupTargets()
+	if len(targets) == 0 {
+		return sendCmd(m.ip, m.port, method, params, successMsg, failPrefix, onSuccess)
+	}
+	return fanoutCmd(targets, names, method, params, m.activeGroup+" → "+successMsg)
 }
 
 // startDetachedTimer launches a detached worker process for timer actions.
@@ -657,9 +750,14 @@ func (m model) renderDashboard() string {
 		}
 	}
 
+	targetLine := fmt.Sprintf("Target   %s:%s", m.ip, m.port)
+	if m.activeGroup != "" {
+		targetLine = fmt.Sprintf("Target   group: %s", m.activeGroup)
+	}
+
 	core := metricBlock("Core", []string{
 		fmt.Sprintf("Power    %s", powerStyle.Bold(true).Render(powerState)),
-		fmt.Sprintf("Target   %s:%s", m.ip, m.port),
+		targetLine,
 		aliasLine,
 		modeLine,
 		syncLine,

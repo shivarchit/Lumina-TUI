@@ -68,3 +68,23 @@ func TestSceneParams(t *testing.T) {
 		t.Fatalf("first scene must be Ocean/1, got %+v", scenes[0])
 	}
 }
+
+func TestGroupTargetsResolvesMacsToIPs(t *testing.T) {
+	m := testModel()
+	m.savedDevices = []config.SavedDevice{
+		{Name: "Desk", IP: "10.0.0.2", Port: "38899", Mac: "aa:aa"},
+		{Name: "Shelf", IP: "10.0.0.3", Mac: "bb:bb"},
+	}
+	m.groups = []config.Group{{Name: "Room", Macs: []string{"aa:aa", "bb:bb", "cc:cc"}}}
+	m.activeGroup = "Room"
+	targets, names := m.groupTargets()
+	if len(targets) != 2 || len(names) != 2 {
+		t.Fatalf("expected 2 resolvable members, got %d/%d", len(targets), len(names))
+	}
+	if targets[0][0] != "10.0.0.2" || targets[0][1] != "38899" {
+		t.Fatalf("bad first target: %v", targets[0])
+	}
+	if targets[1][1] != m.port {
+		t.Fatalf("missing member port must fall back to model port, got %q", targets[1][1])
+	}
+}

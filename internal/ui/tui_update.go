@@ -150,6 +150,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = pushStatus(m, statusSuccess, msg.successMsg)
 		}
 		return m, nil
+	case fanoutResultMsg:
+		m.recordCommand(msg.elapsed, nil)
+		if len(msg.failed) == 0 {
+			m = pushStatus(m, statusSuccess, fmt.Sprintf("%s (%d/%d ok)", msg.label, msg.ok, msg.ok))
+		} else {
+			m.commandFailed++
+			m = pushStatus(m, statusError, fmt.Sprintf("%s (%d ok, failed: %s)", msg.label, msg.ok, strings.Join(msg.failed, ", ")))
+		}
+		return m, nil
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
@@ -240,14 +249,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if target {
 						statusMsg = "Power: ON"
 					}
-					cmds = append(cmds, sendCmd(m.ip, m.port, "setState",
+					cmds = append(cmds, m.sendToTarget("setState",
 						map[string]interface{}{"state": target},
 						statusMsg, "Power toggle failed",
 						func(mm *model) { mm.isOn = target }))
 				case 1: // Scenes
 					m.state = scenesView
 				case 2: // Groups
-					m = pushStatus(m, statusInfo, "Groups arrive later this round")
+					m.state = groupsView
 				case 3: // Color Grid
 					m.state = colorPickerView
 				case 4: // Hex Colors
@@ -321,7 +330,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				selectedHex := colorPalette[m.colorCursor].hex
 				selectedName := colorPalette[m.colorCursor].name
 				r, g, b, _ := wiz.HexToRGB(selectedHex)
-				cmds = append(cmds, sendCmd(m.ip, m.port, "setPilot",
+				cmds = append(cmds, m.sendToTarget("setPilot",
 					map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness},
 					"Color: "+selectedName, "Color change failed",
 					func(mm *model) {
@@ -342,7 +351,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m = pushStatus(m, statusError, "Err: Invalid Hex")
 				} else {
 					normalized := normalizeHex(val)
-					cmds = append(cmds, sendCmd(m.ip, m.port, "setPilot",
+					cmds = append(cmds, m.sendToTarget("setPilot",
 						map[string]interface{}{"r": r, "g": g, "b": b, "dimming": m.brightness},
 						"Color: "+normalized, "Color change failed",
 						func(mm *model) {
@@ -372,7 +381,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case colorTempView:
 			sendColorTemp := func(k int) {
 				m.colorTemp = k
-				cmds = append(cmds, sendCmd(m.ip, m.port, "setPilot",
+				cmds = append(cmds, m.sendToTarget("setPilot",
 					map[string]interface{}{"temp": k, "dimming": m.brightness},
 					fmt.Sprintf("Temp: %dK", k), "Color temp failed",
 					func(mm *model) { mm.persistConfig() }))
@@ -446,6 +455,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					selectedDevice := m.discoveredDevices[m.deviceCursor]
 					m.ip = selectedDevice.IP
 					m.activeMac = strings.ToLower(strings.TrimSpace(selectedDevice.Mac))
+					m.activeGroup = ""
 					m.persistConfig()
 					m = pushStatus(m, statusInfo, fmt.Sprintf("Selected: %s (%s)", selectedDevice.Name, selectedDevice.IP))
 					m.state = menuView
@@ -482,6 +492,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.port = selected.Port
 					}
 					m.activeMac = strings.ToLower(strings.TrimSpace(selected.Mac))
+					m.activeGroup = ""
 					m.persistConfig()
 					m = pushStatus(m, statusInfo, fmt.Sprintf("Selected saved device: %s", selected.Name))
 					m.state = menuView
@@ -570,7 +581,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			apply := func(idx int) {
 				s := scenes[idx]
-				cmds = append(cmds, sendCmd(m.ip, m.port, "setPilot", sceneParams(s.id),
+				cmds = append(cmds, m.sendToTarget("setPilot", sceneParams(s.id),
 					"Scene: "+s.name, "Scene failed",
 					func(mm *model) {
 						mm.lastScene = s.id
@@ -614,6 +625,104 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.sceneCursor = idx
 					apply(idx)
 				}
+			}
+		case groupsView:
+			switch msg.String() {
+			case "esc", "q":
+				if m.editingGroup >= 0 {
+					m.editingGroup = -1
+				} else {
+					m.state = menuView
+				}
+			case "up", "k":
+				if m.editingGroup >= 0 {
+					if m.memberCursor > 0 {
+						m.memberCursor--
+					}
+				} else if m.groupCursor > 0 {
+					m.groupCursor--
+				}
+			case "down", "j":
+				if m.editingGroup >= 0 {
+					if m.memberCursor < len(m.savedDevices)-1 {
+						m.memberCursor++
+					}
+				} else if m.groupCursor < len(m.groups)-1 {
+					m.groupCursor++
+				}
+			case "n":
+				m.textInput.CharLimit = 32
+				m.textInput.Placeholder = "Group name"
+				m.textInput.SetValue("")
+				m.textInput.Focus()
+				m.state = groupNameView
+			case "e":
+				if len(m.groups) > 0 {
+					m.editingGroup = m.groupCursor
+					m.memberCursor = 0
+				}
+			case " ":
+				if m.editingGroup >= 0 && len(m.savedDevices) > 0 {
+					mac := strings.ToLower(strings.TrimSpace(m.savedDevices[m.memberCursor].Mac))
+					if mac != "" {
+						g := &m.groups[m.editingGroup]
+						found := -1
+						for i, existing := range g.Macs {
+							if strings.ToLower(strings.TrimSpace(existing)) == mac {
+								found = i
+								break
+							}
+						}
+						if found >= 0 {
+							g.Macs = append(g.Macs[:found], g.Macs[found+1:]...)
+						} else {
+							g.Macs = append(g.Macs, mac)
+						}
+						m.persistConfig()
+					}
+				}
+			case "d":
+				if m.editingGroup < 0 && len(m.groups) > 0 {
+					name := m.groups[m.groupCursor].Name
+					m.groups = append(m.groups[:m.groupCursor], m.groups[m.groupCursor+1:]...)
+					if m.activeGroup == name {
+						m.activeGroup = ""
+					}
+					if m.groupCursor >= len(m.groups) && m.groupCursor > 0 {
+						m.groupCursor--
+					}
+					m.persistConfig()
+					m = pushStatus(m, statusInfo, "Removed group: "+name)
+				}
+			case "enter":
+				if m.editingGroup >= 0 {
+					m.editingGroup = -1
+				} else if len(m.groups) > 0 {
+					m.activeGroup = m.groups[m.groupCursor].Name
+					m = pushStatus(m, statusInfo, "Targeting group: "+m.activeGroup)
+					m.state = menuView
+				}
+			}
+		case groupNameView:
+			switch msg.String() {
+			case "esc":
+				m.textInput.Blur()
+				m.state = groupsView
+			case "enter":
+				name := strings.TrimSpace(m.textInput.Value())
+				if name == "" {
+					m = pushStatus(m, statusError, "Group name cannot be empty")
+				} else {
+					m.groups = append(m.groups, config.Group{Name: name})
+					m.groupCursor = len(m.groups) - 1
+					m.persistConfig()
+					m = pushStatus(m, statusSuccess, "Created group: "+name)
+				}
+				m.textInput.Blur()
+				m.state = groupsView
+			default:
+				m.textInput, cmd = m.textInput.Update(msg)
+				cmds = append(cmds, cmd)
 			}
 		}
 	}
