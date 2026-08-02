@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"wiz-tui/internal/config"
+	"github.com/shivarchit/Lumina-TUI/pkg/config"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"

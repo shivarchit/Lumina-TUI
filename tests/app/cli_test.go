@@ -3,7 +3,7 @@ package app_test
 import (
 	"testing"
 
-	"wiz-tui/internal/app"
+	"github.com/shivarchit/Lumina-TUI/internal/app"
 )
 
 func TestParseVerb(t *testing.T) {

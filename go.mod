@@ -1,4 +1,4 @@
-module wiz-tui
+module github.com/shivarchit/Lumina-TUI
 
 go 1.25.0
 

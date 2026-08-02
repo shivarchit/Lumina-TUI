@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"wiz-tui/internal/version"
+	"github.com/shivarchit/Lumina-TUI/internal/version"
 
 	"github.com/charmbracelet/lipgloss"
 )

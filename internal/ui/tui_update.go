@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"wiz-tui/internal/config"
-	"wiz-tui/internal/wiz"
+	"github.com/shivarchit/Lumina-TUI/pkg/config"
+	"github.com/shivarchit/Lumina-TUI/pkg/wiz"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"

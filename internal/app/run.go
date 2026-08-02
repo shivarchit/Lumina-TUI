@@ -10,10 +10,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/joho/godotenv"
-	"wiz-tui/internal/config"
-	"wiz-tui/internal/ui"
-	"wiz-tui/internal/version"
-	"wiz-tui/internal/wiz"
+	"github.com/shivarchit/Lumina-TUI/pkg/config"
+	"github.com/shivarchit/Lumina-TUI/internal/ui"
+	"github.com/shivarchit/Lumina-TUI/internal/version"
+	"github.com/shivarchit/Lumina-TUI/pkg/wiz"
 )
 
 var cliVerbs = map[string]bool{"on": true, "off": true, "color": true, "temp": true, "scene": true, "status": true, "discover": true}

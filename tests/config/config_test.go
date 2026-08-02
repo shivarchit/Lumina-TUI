@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"wiz-tui/internal/config"
+	"github.com/shivarchit/Lumina-TUI/pkg/config"
 )
 
 func TestSaveToWritesAtomically(t *testing.T) {

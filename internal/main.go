@@ -1,6 +1,6 @@
 package main
 
-import "wiz-tui/internal/app"
+import "github.com/shivarchit/Lumina-TUI/internal/app"
 
 func main() {
 	app.Run()
