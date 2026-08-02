@@ -31,11 +31,11 @@ type PilotState struct {
 
 // Device describes a discovered WiZ device.
 type Device struct {
-	IP       string
-	Mac      string
-	Name     string
-	Model    string
-	Firmware string
+	IP       string `json:"ip"`
+	Mac      string `json:"mac"`
+	Name     string `json:"name"`
+	Model    string `json:"model"`
+	Firmware string `json:"firmware"`
 }
 
 // DiscoverDevices scans local network broadcast targets and returns detected bulbs.
