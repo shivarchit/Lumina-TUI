@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"wiz-tui/internal/config"
-	"wiz-tui/internal/ui"
+	"github.com/shivarchit/Lumina-TUI/pkg/config"
+	"github.com/shivarchit/Lumina-TUI/internal/ui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

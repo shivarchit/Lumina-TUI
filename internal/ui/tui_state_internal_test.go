@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	"wiz-tui/internal/config"
+	"github.com/shivarchit/Lumina-TUI/pkg/config"
 )
 
 func TestActiveMac(t *testing.T) {

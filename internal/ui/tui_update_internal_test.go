@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"wiz-tui/internal/config"
-	"wiz-tui/internal/wiz"
+	"github.com/shivarchit/Lumina-TUI/pkg/config"
+	"github.com/shivarchit/Lumina-TUI/pkg/wiz"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

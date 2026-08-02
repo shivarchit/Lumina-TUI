@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"wiz-tui/internal/wiz"
+	"github.com/shivarchit/Lumina-TUI/pkg/wiz"
 )
 
 func TestHexToRGB(t *testing.T) {
